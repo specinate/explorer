@@ -30,6 +30,9 @@
     "three": "^0.180.0",
     "three-stdlib": "^2.36.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp", "unrs-resolver"]
+  },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
