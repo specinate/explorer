@@ -13,10 +13,8 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: true,
-  experimental: {
-    turbo: {
-      resolveExtensions: [".ts", ".tsx", ".js", ".jsx", ".json"],
-    },
+  turbopack: {
+    resolveExtensions: [".ts", ".tsx", ".js", ".jsx", ".json"]
   },
 };
 
