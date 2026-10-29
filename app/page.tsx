@@ -2,7 +2,7 @@
 
 import { Canvas } from "@react-three/fiber"
 import { OrbitControls, Environment } from "@react-three/drei"
-import { Suspense, useState, useRef } from "react"
+import { Suspense, useState, useRef, useEffect } from "react"
 import { Globe } from "@/app/components/globe"
 import { StatsBar } from "@/app/components/stats-bar"
 import { SpeciesSearch } from "@/app/components/species-search"
@@ -10,6 +10,15 @@ import { HotspotModal } from "@/app/components/hotspot-modal"
 import { SpecinateLoader } from "@/app/components/specinate-loader"
 import type { OrbitControls as OrbitControlsType } from "three-stdlib"
 import type { iNaturalistTaxon } from "@/app/lib/inaturalist"
+
+function isWebGLAvailable() {
+  try {
+    const canvas = document.createElement("canvas")
+    return !!(canvas.getContext("webgl2") || canvas.getContext("webgl"))
+  } catch {
+    return false
+  }
+}
 
 interface GlobeRef {
   rotateToHotspot: (hotspotId: string) => void
@@ -22,8 +31,15 @@ export default function Page() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [globeSpecies, setGlobeSpecies] = useState<iNaturalistTaxon[]>([])
   const [isGlobeLoaded, setIsGlobeLoaded] = useState(false)
+  const [webGLSupported, setWebGLSupported] = useState<boolean | null>(null)
   const controlsRef = useRef<OrbitControlsType>(null)
   const globeRef = useRef<GlobeRef>(null)
+
+  useEffect(() => {
+    const supported = isWebGLAvailable()
+    setWebGLSupported(supported)
+    if (!supported) setIsGlobeLoaded(true)
+  }, [])
 
   const handleSpeciesSelect = (species: iNaturalistTaxon) => {
     setSelectedSpecies(species)
@@ -97,6 +113,18 @@ export default function Page() {
 
       {/* Species Globe Section */}
       <section className="globe-container flex-1 relative min-h-0 min-h-[50vh]">
+        {webGLSupported === false ? (
+          <div className="absolute inset-0 flex items-center justify-center p-6">
+            <div className="max-w-md text-center space-y-3 bg-white/90 border border-gray-200 rounded-xl shadow-lg p-6">
+              <h2 className="text-lg font-semibold text-slate-800">3D globe unavailable</h2>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                Your browser couldn&apos;t start WebGL, which the globe needs. Try enabling hardware
+                acceleration in your browser settings, updating your graphics drivers, or using a
+                different browser. You can still search for species above.
+              </p>
+            </div>
+          </div>
+        ) : webGLSupported && (
         <Canvas
           camera={{ position: [0, 0, 30], fov: 12 }}
           style={{ touchAction: 'auto' }}
@@ -138,6 +166,7 @@ export default function Page() {
             <Environment preset="sunset" />
           </Suspense>
         </Canvas>
+        )}
 
         {/* Help Icon */}
         <div className="absolute bottom-4 right-4 lg:bottom-6 lg:right-6 z-10">

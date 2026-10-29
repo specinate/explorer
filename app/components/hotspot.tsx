@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useFrame } from "@react-three/fiber"
 import * as THREE from "three"
 
@@ -19,10 +19,28 @@ const URGENCY_COLORS = {
   moderate: "#10b981",
 }
 
+// Touch devices get larger markers plus an invisible hit area sized for fingers
+function useIsTouchDevice() {
+  const [isTouch, setIsTouch] = useState(false)
+
+  useEffect(() => {
+    const query = window.matchMedia("(pointer: coarse)")
+    setIsTouch(query.matches)
+    const onChange = (e: MediaQueryListEvent) => setIsTouch(e.matches)
+    query.addEventListener("change", onChange)
+    return () => query.removeEventListener("change", onChange)
+  }, [])
+
+  return isTouch
+}
+
 export function Hotspot({ position, urgency, isSelected, onClick, onPointerOver, onPointerOut }: HotspotProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const pulseRef = useRef<THREE.Mesh>(null)
   const [isHovered, setIsHovered] = useState(false)
+  const isTouch = useIsTouchDevice()
+  const markerScale = isTouch ? 1.75 : 1
+  const hitRadius = isTouch ? 0.3 : 0.12
 
   useFrame((state) => {
     if (meshRef.current) {
@@ -49,20 +67,25 @@ export function Hotspot({ position, urgency, isSelected, onClick, onPointerOver,
 
   return (
     <group position={position}>
-      {/* Main Hotspot */}
-      <mesh 
-        ref={meshRef} 
-        onClick={onClick} 
-        onPointerOver={handlePointerOver} 
+      {/* Hit Area - invisible, larger than the marker so it's easy to tap */}
+      <mesh
+        onClick={onClick}
+        onPointerOver={handlePointerOver}
         onPointerOut={handlePointerOut}
       >
-        <sphereGeometry args={[0.08, 16, 16]} />
+        <sphereGeometry args={[hitRadius, 16, 16]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+
+      {/* Main Hotspot */}
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[0.08 * markerScale, 16, 16]} />
         <meshBasicMaterial color={URGENCY_COLORS[urgency]} transparent opacity={isSelected ? 1 : 0.9} />
       </mesh>
 
       {/* Pulsing Ring */}
       <mesh ref={pulseRef}>
-        <ringGeometry args={[0.1, 0.15, 32]} />
+        <ringGeometry args={[0.1 * markerScale, 0.15 * markerScale, 32]} />
         <meshBasicMaterial color={URGENCY_COLORS[urgency]} transparent opacity={0.3} side={THREE.DoubleSide} />
       </mesh>
 
