@@ -47,3 +47,44 @@ body {
 .globe-container {
   touch-action: none;
 }
+
+/* Species tooltip: fade loaded content in over its skeleton */
+@keyframes tooltip-content-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-tooltip-content {
+  animation: tooltip-content-in 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-tooltip-content { animation: none; }
+}
+
+/* Globe skeleton: meridians sweep across the sphere so it reads as spinning */
+@keyframes globe-skeleton-spin {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(-1); }
+}
+
+@keyframes globe-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+.globe-skeleton-meridian {
+  transform-box: fill-box;
+  transform-origin: center;
+  /* ease-in-out approximates cos(angle): fast across the middle, slow at the edges */
+  animation: globe-skeleton-spin ease-in-out infinite;
+}
+
+.globe-skeleton-pulse {
+  animation: globe-skeleton-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .globe-skeleton-meridian,
+  .globe-skeleton-pulse { animation: none; }
+}

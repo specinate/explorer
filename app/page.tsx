@@ -7,7 +7,7 @@ import { Globe } from "@/app/components/globe"
 import { StatsBar } from "@/app/components/stats-bar"
 import { SpeciesSearch } from "@/app/components/species-search"
 import { HotspotModal } from "@/app/components/hotspot-modal"
-import { SpecinateLoader } from "@/app/components/specinate-loader"
+import { GlobeSkeleton } from "@/app/components/globe-skeleton"
 import type { OrbitControls as OrbitControlsType } from "three-stdlib"
 import type { iNaturalistTaxon } from "@/app/lib/inaturalist"
 
@@ -21,8 +21,10 @@ function isWebGLAvailable() {
 }
 
 interface GlobeRef {
-  rotateToHotspot: (hotspotId: string) => void
+  rotateToHotspot: (hotspotId: string) => boolean
 }
+
+const SKELETON_MIN_MS = 1500
 
 export default function Page() {
   const [selectedHotspot, setSelectedHotspot] = useState<string | null>(null)
@@ -31,6 +33,13 @@ export default function Page() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [globeSpecies, setGlobeSpecies] = useState<iNaturalistTaxon[]>([])
   const [isGlobeLoaded, setIsGlobeLoaded] = useState(false)
+  // Keep the skeleton up for a moment even when the globe loads instantly, so it reads
+  // as a deliberate intro rather than a flash
+  const [skeletonMinElapsed, setSkeletonMinElapsed] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setSkeletonMinElapsed(true), SKELETON_MIN_MS)
+    return () => clearTimeout(timer)
+  }, [])
   const [webGLSupported, setWebGLSupported] = useState<boolean | null>(null)
   const controlsRef = useRef<OrbitControlsType>(null)
   const globeRef = useRef<GlobeRef>(null)
@@ -54,12 +63,12 @@ export default function Page() {
     const hotspotId = `dynamic-${species.id}`
     setSelectedHotspot(hotspotId)
 
-    // Show the popup for this species
-    setHoveredHotspot(hotspotId)
-
-    // Rotate globe to the species marker
-    if (globeRef.current) {
-      globeRef.current.rotateToHotspot(hotspotId)
+    // Rotate globe to the species marker and show its popup; species with no known
+    // wild location have no marker, so open their details instead
+    if (globeRef.current?.rotateToHotspot(hotspotId)) {
+      setHoveredHotspot(hotspotId)
+    } else {
+      setIsModalOpen(true)
     }
   }
 
@@ -73,14 +82,6 @@ export default function Page() {
       {/* Background Pattern */}
       <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2260%22%20height%3D%2260%22%20viewBox%3D%220%200%2060%2060%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Cg%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%3Cg%20fill%3D%22%23ffffff%22%20fill-opacity%3D%220.02%22%3E%3Ccircle%20cx%3D%2230%22%20cy%3D%2230%22%20r%3D%221%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-40"></div>
 
-      {/* Loading Overlay */}
-             {!isGlobeLoaded && (
-               <div className="absolute inset-0 bg-slate-100 flex items-center justify-center z-50">
-                 <div className="text-center space-y-4">
-                   <SpecinateLoader size="lg" text="The globe is on its way! 🌍" />
-                 </div>
-               </div>
-             )}
 
       {/* Header Section - Fixed at Top */}
       <header className="flex-shrink-0 bg-white/95 backdrop-blur-md border-b border-gray-200/50 p-4 lg:p-6 relative z-30">
@@ -93,12 +94,21 @@ export default function Page() {
               </h1>
 
               {/* Narrative Text */}
-              <div className="max-w-3xl">
-                <p className="text-slate-600 text-sm lg:text-base leading-relaxed">
-                  Discover the world&apos;s most fascinating species through an interactive 3D globe.
-                  Explore real-time data from iNaturalist to learn about wildlife conservation,
-                  track species observations, and understand the critical importance of biodiversity
-                  protection across our planet.
+              <div className="max-w-2xl space-y-2 text-sm lg:text-base leading-relaxed">
+                <p className="text-slate-800 font-medium">
+                  Every dot is an animal someone actually saw.
+                </p>
+                <p className="text-slate-600">
+                  A tiger. A frog. A hawk over a parking lot. Real sightings, from real people,
+                  shared on iNaturalist.
+                </p>
+                <p className="text-slate-600">
+                  Spin the globe. Pick one. The ones in{" "}
+                  <span className="inline-flex items-center gap-1 font-medium text-red-600">
+                    <span className="w-2 h-2 rounded-full bg-red-500" aria-hidden />
+                    red
+                  </span>{" "}
+                  are running out of time.
                 </p>
               </div>
         </div>
@@ -168,6 +178,9 @@ export default function Page() {
         </Canvas>
         )}
 
+        {/* Spinning wireframe in the globe's place until it's ready, then fades out */}
+        <GlobeSkeleton visible={!isGlobeLoaded || (webGLSupported !== false && !skeletonMinElapsed)} />
+
         {/* Help Icon */}
         <div className="absolute bottom-4 right-4 lg:bottom-6 lg:right-6 z-10">
           <button className="group relative w-10 h-10 lg:w-12 lg:h-12 bg-white/80 backdrop-blur-md border border-white/40 rounded-full shadow-lg hover:bg-white/90 transition-all duration-200 flex items-center justify-center">
@@ -194,6 +207,17 @@ export default function Page() {
             </div>
             </button>
           </div>
+
+        {/* Floating footer; narrower than the section so it clears the help button */}
+        <footer className="absolute left-1/2 -translate-x-1/2 bottom-[max(1rem,env(safe-area-inset-bottom))] lg:bottom-6 z-10 w-max max-w-[calc(100%-7rem)] lg:max-w-[calc(100%-10rem)] px-4 py-2 bg-white/80 backdrop-blur-md border border-white/40 rounded-2xl lg:rounded-full shadow-lg text-center text-[11px] lg:text-xs text-slate-600 leading-snug">
+          <span>© {new Date().getFullYear()} SpeciNate Conservation LLC. All rights reserved.</span>{" "}
+          <span className="whitespace-nowrap">
+            Need help?{" "}
+            <a href="mailto:corianoharris@specinate.com" className="font-medium text-blue-600 hover:text-blue-700 underline-offset-2 hover:underline">
+              corianoharris@specinate.com
+            </a>
+          </span>
+        </footer>
       </section>
 
 

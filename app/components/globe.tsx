@@ -7,7 +7,7 @@ import { useTexture } from "@react-three/drei"
 import * as THREE from "three"
 import { Hotspot } from "./hotspot"
 import { HotspotTooltip } from "./hotspot-tooltip"
-import { inaturalistAPI, type iNaturalistTaxon } from "@/app/lib/inaturalist"
+import { inaturalistAPI, getSightingLatLng, getStatusMarkerColor, type iNaturalistTaxon } from "@/app/lib/inaturalist"
 
 // Commented out static hotspots - now using only iNaturalist data
 /*
@@ -163,7 +163,8 @@ export const HOTSPOT_DATA: Record<
 }
 
 interface GlobeRef {
-  rotateToHotspot: (hotspotId: string) => void
+  // Returns false when the species has no marker (no wild sighting with a location)
+  rotateToHotspot: (hotspotId: string) => boolean
 }
 
 interface GlobeProps {
@@ -175,11 +176,31 @@ interface GlobeProps {
   onGlobeLoad?: () => void
 }
 
+const MARKER_RADIUS = 2.1
+
+// Matches how SphereGeometry wraps an equirectangular texture: longitude 0 faces +X
+// and east runs toward -Z, so z needs the negative sine
+function latLngToPosition(lat: number, lng: number): [number, number, number] {
+  const latRad = (lat * Math.PI) / 180
+  const lngRad = (lng * Math.PI) / 180
+  return [
+    Math.cos(latRad) * Math.cos(lngRad) * MARKER_RADIUS,
+    Math.sin(latRad) * MARKER_RADIUS,
+    -Math.cos(latRad) * Math.sin(lngRad) * MARKER_RADIUS,
+  ]
+}
+
+// Upper bound on markers; the search list adds species 20 at a time via "Show more"
+const MAX_MARKERS = 100
+const BULK_BATCH_SIZE = 20
+// Parallel per-species lookups for species the bulk request missed
+const LOOKUP_CONCURRENCY = 4
+
 export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
   { onHotspotClick, selectedHotspot, onHotspotHover, hoveredHotspot, globeSpecies, onGlobeLoad },
   ref,
 ) {
-  const globeRef = useRef<THREE.Mesh>(null)
+  const globeRef = useRef<THREE.Group>(null)
   const targetRotation = useRef<number | null>(null)
   const isRotating = useRef(false)
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -197,223 +218,91 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
     id: string
     name: string
     position: [number, number, number]
-    urgency: "critical" | "high" | "moderate"
+    color: string
     species: string
     taxon: iNaturalistTaxon
-    observationCount: number
   }>>([])
+
+  // Where each species' marker sits (null = no wild sighting with coordinates, so no marker).
+  // Kept across searches and "Show more" so nothing is fetched twice
+  const placementsRef = useRef(new Map<number, [number, number, number] | null>())
 
   // Create hotspots from search results
   useEffect(() => {
+    let cancelled = false
+
     const createHotspotsFromSpecies = async () => {
-      console.log('Globe: createHotspotsFromSpecies called with', globeSpecies.length, 'species')
-      if (globeSpecies.length === 0) {
-        console.log('Globe: No species provided, clearing hotspots')
-        setDynamicHotspots([])
-        return
+      const species = globeSpecies.slice(0, MAX_MARKERS)
+      const placements = placementsRef.current
+      const missingIds = species.map((taxon) => taxon.id).filter((id) => !placements.has(id))
+
+      // One bulk request covers most species, but it returns the newest sightings across
+      // all of them (max ~200), so common species can crowd out rare ones
+      const unplaced: number[] = []
+      for (let i = 0; i < missingIds.length; i += BULK_BATCH_SIZE) {
+        const batch = missingIds.slice(i, i + BULK_BATCH_SIZE)
+        const observationsByTaxon = await inaturalistAPI.getBulkSpeciesObservations(batch, 3)
+        for (const id of batch) {
+          const latLng = (observationsByTaxon[id] || []).map(getSightingLatLng).find(Boolean)
+          if (latLng) {
+            placements.set(id, latLngToPosition(latLng.lat, latLng.lng))
+          } else {
+            unplaced.push(id)
+          }
+        }
       }
 
-      const hotspotsWithCoords = []
-      
-      // Process species in batches for better performance
-      const speciesBatch = globeSpecies.slice(0, 20) // Can handle more species now with bulk API
-      const taxonIds = speciesBatch.map(taxon => taxon.id)
-      
-      try {
-        // Make ONE bulk API call for all species observations
-        console.log('Fetching observations for', taxonIds.length, 'species in one call...')
-        const observationsByTaxon = await inaturalistAPI.getBulkSpeciesObservations(taxonIds, 3) // 3 observations per species
-        console.log('Globe: Received observations for', Object.keys(observationsByTaxon).length, 'species')
-        
-        // Create hotspots from the bulk data
-        const createdHotspots = speciesBatch.map((taxon) => {
-          console.log('Globe: Processing species', taxon.name, 'with ID', taxon.id)
-          const observations = observationsByTaxon[taxon.id] || []
-          
-          // Find observations with valid coordinates
-          const validObservations = observations.filter(obs => 
-            obs.location && obs.location.length === 2 && 
-            obs.location[0] !== null && obs.location[1] !== null
-          )
-          
-          let position: [number, number, number]
-          let observationCount = 0
-          
-          if (validObservations.length > 0) {
-            // Use the most recent observation's coordinates
-            const latestObs = validObservations[0]
-            const [lng, lat] = latestObs.location
-            
-            // Convert lat/lng to 3D coordinates on globe
-            const latRad = (lat * Math.PI) / 180
-            const lngRad = (lng * Math.PI) / 180
-            const x = Math.cos(latRad) * Math.cos(lngRad) * 2.1
-            const y = Math.sin(latRad) * 2.1
-            const z = Math.cos(latRad) * Math.sin(lngRad) * 2.1
-            
-            position = [x, y, z]
-            observationCount = validObservations.length
-          } else {
-            // If no coordinates, place randomly but still create the hotspot
-            const lat = (Math.random() - 0.5) * Math.PI
-            const lng = Math.random() * 2 * Math.PI
-            const x = Math.cos(lat) * Math.cos(lng) * 2.1
-            const y = Math.sin(lat) * 2.1
-            const z = Math.cos(lat) * Math.sin(lng) * 2.1
-            
-            position = [x, y, z]
-            observationCount = 0
-          }
-          
-          const status = inaturalistAPI.getEnhancedIUCNStatus(taxon)
-          const priority = inaturalistAPI.getConservationPriority(status)
-          const urgency = priority === 'low' ? 'moderate' : priority as "critical" | "high" | "moderate"
-          
-          return {
-            id: `dynamic-${taxon.id}`,
-            name: taxon.preferred_common_name || taxon.name,
-            position,
-            urgency,
-            species: taxon.name,
-            taxon,
-            observationCount
-          }
-        })
-        
-        hotspotsWithCoords.push(...createdHotspots)
-        console.log(`Successfully created ${createdHotspots.length} hotspots from bulk API call`)
-        
-      } catch (error) {
-        console.error('Bulk API call failed, falling back to individual calls:', error)
-        
-        // Fallback to individual calls if bulk fails
-        const fallbackPromises = speciesBatch.slice(0, 10).map(async (taxon) => {
-          try {
-            const observations = await inaturalistAPI.getSpeciesObservationsWithGeo(taxon.id, 3)
-            const validObservations = observations.filter(obs => 
-              obs.location && obs.location.length === 2 && 
-              obs.location[0] !== null && obs.location[1] !== null
-            )
-            
-            let position: [number, number, number]
-            let observationCount = 0
-            
-            if (validObservations.length > 0) {
-              const latestObs = validObservations[0]
-              const [lng, lat] = latestObs.location
-              const latRad = (lat * Math.PI) / 180
-              const lngRad = (lng * Math.PI) / 180
-              const x = Math.cos(latRad) * Math.cos(lngRad) * 2.1
-              const y = Math.sin(latRad) * 2.1
-              const z = Math.cos(latRad) * Math.sin(lngRad) * 2.1
-              position = [x, y, z]
-              observationCount = validObservations.length
-            } else {
-              const lat = (Math.random() - 0.5) * Math.PI
-              const lng = Math.random() * 2 * Math.PI
-              const x = Math.cos(lat) * Math.cos(lng) * 2.1
-              const y = Math.sin(lat) * 2.1
-              const z = Math.cos(lat) * Math.sin(lng) * 2.1
-              position = [x, y, z]
-              observationCount = 0
-            }
-            
-            const status = inaturalistAPI.getEnhancedIUCNStatus(taxon)
-            const priority = inaturalistAPI.getConservationPriority(status)
-            const urgency = priority === 'low' ? 'moderate' : priority as "critical" | "high" | "moderate"
-            
-            return {
-              id: `dynamic-${taxon.id}`,
-              name: taxon.preferred_common_name || taxon.name,
-              position,
-              urgency,
-              species: taxon.name,
-              taxon,
-              observationCount
-            }
-          } catch (obsError) {
-            console.warn(`Fallback failed for ${taxon.name}:`, obsError)
-            // Return random position
-            const lat = (Math.random() - 0.5) * Math.PI
-            const lng = Math.random() * 2 * Math.PI
-            const x = Math.cos(lat) * Math.cos(lng) * 2.1
-            const y = Math.sin(lat) * 2.1
-            const z = Math.cos(lat) * Math.sin(lng) * 2.1
-            
-            const status = inaturalistAPI.getEnhancedIUCNStatus(taxon)
-            const priority = inaturalistAPI.getConservationPriority(status)
-            const urgency = priority === 'low' ? 'moderate' : priority as "critical" | "high" | "moderate"
-            
-            return {
-              id: `dynamic-${taxon.id}`,
-              name: taxon.preferred_common_name || taxon.name,
-              position: [x, y, z] as [number, number, number],
-              urgency,
-              species: taxon.name,
-              taxon,
-              observationCount: 0
-            }
-          }
-        })
-        
-        const fallbackHotspots = await Promise.all(fallbackPromises)
-        hotspotsWithCoords.push(...fallbackHotspots)
-      }
-      
-      console.log(`Created ${hotspotsWithCoords.length} hotspots from search results:`, hotspotsWithCoords)
-      
-      // If no hotspots were created, add some test markers to verify rendering works
-      if (hotspotsWithCoords.length === 0) {
-        console.log('No hotspots created, adding test markers...')
-        const testHotspots = [
-          {
-            id: 'test-1',
-            name: 'Test Marker 1',
-            position: [1.5, 0.5, 1.0] as [number, number, number],
-            urgency: 'critical' as const,
-            species: 'Test Species',
-            taxon: globeSpecies[0] || {} as iNaturalistTaxon,
-            observationCount: 5
-          },
-          {
-            id: 'test-2',
-            name: 'Test Marker 2',
-            position: [-1.5, -0.5, 1.0] as [number, number, number],
-            urgency: 'high' as const,
-            species: 'Test Species 2',
-            taxon: globeSpecies[1] || {} as iNaturalistTaxon,
-            observationCount: 3
-          }
-        ]
-        setDynamicHotspots(testHotspots)
-      } else {
-        setDynamicHotspots(hotspotsWithCoords)
-      }
+      // Look the crowded-out species up individually, a few at a time
+      const queue = [...unplaced]
+      await Promise.all(Array.from({ length: LOOKUP_CONCURRENCY }, async () => {
+        for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+          const sighting = await inaturalistAPI.getLatestSighting(id)
+          const latLng = sighting && getSightingLatLng(sighting)
+          placements.set(id, latLng ? latLngToPosition(latLng.lat, latLng.lng) : null)
+        }
+      }))
+
+      if (cancelled) return
+
+      setDynamicHotspots(species.flatMap((taxon) => {
+        const position = placements.get(taxon.id)
+        if (!position) return []
+        return [{
+          id: `dynamic-${taxon.id}`,
+          name: taxon.preferred_common_name || taxon.name,
+          position,
+          color: getStatusMarkerColor(inaturalistAPI.getIUCNStatus(taxon)),
+          species: taxon.name,
+          taxon,
+        }]
+      }))
     }
 
     createHotspotsFromSpecies()
+    return () => {
+      cancelled = true
+    }
   }, [globeSpecies])
 
-  // Notify parent when globe is loaded
-  useEffect(() => {
-    if (onGlobeLoad) {
-      // Add a small delay to ensure the globe is fully rendered
-      const timer = setTimeout(() => {
-        onGlobeLoad()
-      }, 1000)
-      return () => clearTimeout(timer)
+  // Notify parent once the globe has drawn its first frame. This component only mounts
+  // after its Earth texture loads (useTexture suspends), so that frame shows the real globe
+  const hasNotifiedLoad = useRef(false)
+  useFrame(() => {
+    if (!hasNotifiedLoad.current) {
+      hasNotifiedLoad.current = true
+      onGlobeLoad?.()
     }
-  }, [onGlobeLoad])
+  })
 
   useImperativeHandle(ref, () => ({
     rotateToHotspot: (hotspotId: string) => {
         const hotspot = dynamicHotspots.find((h) => h.id === hotspotId)
-        if (hotspot && globeRef.current) {
-          const [x, , z] = hotspot.position
-          const targetY = Math.atan2(x, z)
-          targetRotation.current = targetY
-          isRotating.current = true
-        }
+        if (!hotspot) return false
+        // Rotation about Y that brings the marker round to face the camera (+Z)
+        const [x, , z] = hotspot.position
+        targetRotation.current = Math.atan2(-x, z)
+        isRotating.current = true
+        return true
     },
   }))
 
@@ -436,62 +325,66 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
     }
   })
 
+  const hoveredHotspotData = hoveredHotspot ? dynamicHotspots.find((h) => h.id === hoveredHotspot) : undefined
+
   const earthTexture = useTexture("/realistic-earth-texture-map.jpg")
 
   return (
     <group>
-      <Sphere ref={globeRef} args={[2, 32, 32]}>
-        <meshStandardMaterial 
-          map={earthTexture} 
-          roughness={0.8} 
-          metalness={0.2}
-          color="#ffffff"
-        />
-      </Sphere>
+      {/* Globe and markers rotate together so markers stay pinned to their locations */}
+      <group ref={globeRef}>
+        <Sphere args={[2, 32, 32]}>
+          <meshStandardMaterial 
+            map={earthTexture} 
+            roughness={0.8} 
+            metalness={0.2}
+            color="#ffffff"
+          />
+        </Sphere>
 
-      <Sphere args={[2.05, 32, 32]}>
-        <meshBasicMaterial color="#4a90e2" transparent opacity={0.1} side={THREE.BackSide} />
-      </Sphere>
+        <Sphere args={[2.05, 32, 32]}>
+          <meshBasicMaterial color="#4a90e2" transparent opacity={0.1} side={THREE.BackSide} />
+        </Sphere>
 
-      {/* Dynamic hotspots from search results */}
-      {dynamicHotspots.map((hotspot) => (
-        <Hotspot
-          key={hotspot.id}
-          position={hotspot.position}
-          urgency={hotspot.urgency}
-          isSelected={selectedHotspot === hotspot.id}
-          onClick={() => onHotspotClick(hotspot.id)}
-          onPointerOver={() => {
-            // Clear any existing timeout
-            if (hoverTimeoutRef.current) {
-              clearTimeout(hoverTimeoutRef.current)
-            }
-            // Set a new timeout for hover
-            hoverTimeoutRef.current = setTimeout(() => {
-              onHotspotHover(hotspot.id)
-            }, 150) // 150ms delay
-          }}
-          onPointerOut={() => {
-            // Clear timeout and immediately hide
-            if (hoverTimeoutRef.current) {
-              clearTimeout(hoverTimeoutRef.current)
-              hoverTimeoutRef.current = null
-            }
-            onHotspotHover(null)
-          }}
-        />
-      ))}
+        {/* Dynamic hotspots from search results */}
+        {dynamicHotspots.map((hotspot) => (
+          <Hotspot
+            key={hotspot.id}
+            position={hotspot.position}
+            color={hotspot.color}
+            isSelected={selectedHotspot === hotspot.id}
+            onClick={() => onHotspotClick(hotspot.id)}
+            onPointerOver={() => {
+              // Clear any existing timeout
+              if (hoverTimeoutRef.current) {
+                clearTimeout(hoverTimeoutRef.current)
+              }
+              // Set a new timeout for hover
+              hoverTimeoutRef.current = setTimeout(() => {
+                onHotspotHover(hotspot.id)
+              }, 150) // 150ms delay
+            }}
+            onPointerOut={() => {
+              // Clear timeout and immediately hide
+              if (hoverTimeoutRef.current) {
+                clearTimeout(hoverTimeoutRef.current)
+                hoverTimeoutRef.current = null
+              }
+              onHotspotHover(null)
+            }}
+          />
+        ))}
 
-      {hoveredHotspot && (
-        <Html 
-          position={dynamicHotspots.find((h) => h.id === hoveredHotspot)?.position as [number, number, number]}
-          zIndexRange={[99999, 100000]}
-          style={{ zIndex: 99999 }}
-          center
-        >
-          <HotspotTooltip hotspotId={hoveredHotspot} />
-        </Html>
-      )}
+        {hoveredHotspotData && (
+          <Html 
+            position={hoveredHotspotData.position}
+            zIndexRange={[99999, 100000]}
+            style={{ zIndex: 99999 }}
+          >
+            <HotspotTooltip hotspotId={hoveredHotspotData.id} />
+          </Html>
+        )}
+      </group>
     </group>
   )
 })

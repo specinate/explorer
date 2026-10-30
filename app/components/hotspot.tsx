@@ -6,17 +6,11 @@ import * as THREE from "three"
 
 interface HotspotProps {
   position: [number, number, number]
-  urgency: "critical" | "high" | "moderate"
+  color: string
   isSelected: boolean
   onClick: () => void
   onPointerOver: () => void
   onPointerOut: () => void
-}
-
-const URGENCY_COLORS = {
-  critical: "#ef4444",
-  high: "#f59e0b",
-  moderate: "#10b981",
 }
 
 // Touch devices get larger markers plus an invisible hit area sized for fingers
@@ -34,9 +28,9 @@ function useIsTouchDevice() {
   return isTouch
 }
 
-export function Hotspot({ position, urgency, isSelected, onClick, onPointerOver, onPointerOut }: HotspotProps) {
+export function Hotspot({ position, color, isSelected, onClick, onPointerOver, onPointerOut }: HotspotProps) {
   const meshRef = useRef<THREE.Mesh>(null)
-  const pulseRef = useRef<THREE.Mesh>(null)
+  const pulseRef = useRef<THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>>(null)
   const [isHovered, setIsHovered] = useState(false)
   const isTouch = useIsTouchDevice()
   const markerScale = isTouch ? 1.75 : 1
@@ -80,17 +74,17 @@ export function Hotspot({ position, urgency, isSelected, onClick, onPointerOver,
       {/* Main Hotspot */}
       <mesh ref={meshRef}>
         <sphereGeometry args={[0.08 * markerScale, 16, 16]} />
-        <meshBasicMaterial color={URGENCY_COLORS[urgency]} transparent opacity={isSelected ? 1 : 0.9} />
+        <meshBasicMaterial color={color} transparent opacity={isSelected ? 1 : 0.9} />
       </mesh>
 
       {/* Pulsing Ring */}
       <mesh ref={pulseRef}>
         <ringGeometry args={[0.1 * markerScale, 0.15 * markerScale, 32]} />
-        <meshBasicMaterial color={URGENCY_COLORS[urgency]} transparent opacity={0.3} side={THREE.DoubleSide} />
+        <meshBasicMaterial color={color} transparent opacity={0.3} side={THREE.DoubleSide} />
       </mesh>
 
       {/* Glow Effect */}
-      <pointLight color={URGENCY_COLORS[urgency]} intensity={isSelected ? 2 : 1} distance={1} />
+      <pointLight color={color} intensity={isSelected ? 2 : 1} distance={1} />
     </group>
   )
 }
