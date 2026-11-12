@@ -1,14 +1,15 @@
 "use client"
 
 import { Canvas } from "@react-three/fiber"
-import { OrbitControls, Environment } from "@react-three/drei"
+import { TrackballControls, Environment } from "@react-three/drei"
 import { Suspense, useState, useRef, useEffect } from "react"
-import { Globe } from "@/app/components/globe"
+import { Globe, type RotateResult } from "@/app/components/globe"
 import { StatsBar } from "@/app/components/stats-bar"
 import { SpeciesSearch } from "@/app/components/species-search"
 import { HotspotModal } from "@/app/components/hotspot-modal"
 import { GlobeSkeleton } from "@/app/components/globe-skeleton"
-import type { OrbitControls as OrbitControlsType } from "three-stdlib"
+import type { TrackballControls as TrackballControlsType } from "three-stdlib"
+import { Quaternion } from "three"
 import type { iNaturalistTaxon } from "@/app/lib/inaturalist"
 
 function isWebGLAvailable() {
@@ -21,7 +22,7 @@ function isWebGLAvailable() {
 }
 
 interface GlobeRef {
-  rotateToHotspot: (hotspotId: string) => boolean
+  rotateToHotspot: (hotspotId: string) => Promise<RotateResult>
 }
 
 const SKELETON_MIN_MS = 1500
@@ -41,8 +42,11 @@ export default function Page() {
     return () => clearTimeout(timer)
   }, [])
   const [webGLSupported, setWebGLSupported] = useState<boolean | null>(null)
-  const controlsRef = useRef<OrbitControlsType>(null)
+  const controlsRef = useRef<TrackballControlsType>(null)
   const globeRef = useRef<GlobeRef>(null)
+  // Name shown while waiting for a selected species' marker to load
+  const [locatingName, setLocatingName] = useState<string | null>(null)
+  const selectRequestRef = useRef(0)
 
   useEffect(() => {
     const supported = isWebGLAvailable()
@@ -50,7 +54,7 @@ export default function Page() {
     if (!supported) setIsGlobeLoaded(true)
   }, [])
 
-  const handleSpeciesSelect = (species: iNaturalistTaxon) => {
+  const handleSpeciesSelect = async (species: iNaturalistTaxon) => {
     setSelectedSpecies(species)
     // Add the selected species to globe species if not already present
     setGlobeSpecies(prev => {
@@ -65,11 +69,64 @@ export default function Page() {
 
     // Rotate globe to the species marker and show its popup; species with no known
     // wild location have no marker, so open their details instead
-    if (globeRef.current?.rotateToHotspot(hotspotId)) {
+    // (its marker may still be loading, so this can wait on the location lookup)
+    const request = ++selectRequestRef.current
+    const pending = globeRef.current?.rotateToHotspot(hotspotId)
+    // Only flash the indicator if the lookup is actually slow
+    const showTimer = setTimeout(() => {
+      if (selectRequestRef.current === request) {
+        setLocatingName(species.preferred_common_name || species.name)
+      }
+    }, 150)
+    const result = pending ? await pending : 'no-marker'
+    clearTimeout(showTimer)
+    if (selectRequestRef.current === request) setLocatingName(null)
+    if (result === 'rotated') {
       setHoveredHotspot(hotspotId)
-    } else {
+    } else if (result === 'no-marker') {
       setIsModalOpen(true)
     }
+  }
+
+  // Smoothly move the camera toward/away from the globe, respecting the controls' limits
+  const zoomBy = (factor: number) => {
+    const controls = controlsRef.current
+    if (!controls) return
+    const camera = controls.object
+    const start = camera.position.length()
+    const end = Math.min(controls.maxDistance, Math.max(controls.minDistance, start * factor))
+    const t0 = performance.now()
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / 250)
+      const eased = 1 - Math.pow(1 - t, 3)
+      camera.position.setLength(start + (end - start) * eased)
+      controls.update()
+      if (t < 1) requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+  }
+
+  // Swing back to the starting view: north up, facing the front, default distance
+  const resetView = () => {
+    const controls = controlsRef.current
+    if (!controls) return
+    const camera = controls.object
+    const fromQuat = camera.quaternion.clone()
+    const toQuat = new Quaternion() // camera at +Z looking at the origin, Y up
+    const fromDist = camera.position.length()
+    const toDist = 30
+    const t0 = performance.now()
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / 600)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const q = fromQuat.clone().slerp(toQuat, eased)
+      camera.position.set(0, 0, fromDist + (toDist - fromDist) * eased).applyQuaternion(q)
+      camera.up.set(0, 1, 0).applyQuaternion(q)
+      camera.quaternion.copy(q)
+      controls.update()
+      if (t < 1) requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
   }
 
   const handleHotspotClick = (hotspotId: string) => {
@@ -84,33 +141,22 @@ export default function Page() {
 
 
       {/* Header Section - Fixed at Top */}
-      <header className="flex-shrink-0 bg-white/95 backdrop-blur-md border-b border-gray-200/50 p-4 lg:p-6 relative z-30">
+      <header className="flex-shrink-0 bg-white/95 backdrop-blur-md border-b border-gray-200/50 px-4 py-3 lg:p-6 relative z-30">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-4">
             {/* Title and Legend */}
             <div className="flex-1">
-              <h1 className="text-2xl lg:text-4xl xl:text-5xl font-bold text-slate-800 text-balance leading-tight mb-4">
+              <h1 className="text-xl lg:text-4xl xl:text-5xl font-bold text-slate-800 text-balance leading-tight mb-1 lg:mb-3">
                 SpeciNate Species Explorer
               </h1>
-
-              {/* Narrative Text */}
-              <div className="max-w-2xl space-y-2 text-sm lg:text-base leading-relaxed">
-                <p className="text-slate-800 font-medium">
-                  Every dot is an animal someone actually saw.
-                </p>
-                <p className="text-slate-600">
-                  A tiger. A frog. A hawk over a parking lot. Real sightings, from real people,
-                  shared on iNaturalist.
-                </p>
-                <p className="text-slate-600">
-                  Spin the globe. Pick one. The ones in{" "}
-                  <span className="inline-flex items-center gap-1 font-medium text-red-600">
-                    <span className="w-2 h-2 rounded-full bg-red-500" aria-hidden />
-                    red
-                  </span>{" "}
-                  are running out of time.
-                </p>
-              </div>
+              <p className="max-w-2xl text-sm lg:text-base leading-snug text-slate-600">
+                Every dot is a real iNaturalist sighting. The{" "}
+                <span className="inline-flex items-center gap-1 font-medium text-red-600">
+                  <span className="w-2 h-2 rounded-full bg-red-500" aria-hidden />
+                  red
+                </span>{" "}
+                ones are running out of time.
+              </p>
         </div>
 
             {/* Search Section */}
@@ -137,7 +183,7 @@ export default function Page() {
         ) : webGLSupported && (
         <Canvas
           camera={{ position: [0, 0, 30], fov: 12 }}
-          style={{ touchAction: 'auto' }}
+          style={{ touchAction: 'none' }}
           dpr={[1, 2]}
           performance={{ min: 0.5 }}
         >
@@ -153,25 +199,22 @@ export default function Page() {
                 globeSpecies={globeSpecies}
               onGlobeLoad={() => setIsGlobeLoaded(true)}
             />
-            <OrbitControls
+            {/* Trackball rather than orbit controls so the globe tumbles freely over the poles */}
+            <TrackballControls
               ref={controlsRef}
-              enablePan={false}
-              enableZoom={true}
-              minDistance={20}
+              noPan
+              minDistance={7}
               maxDistance={60}
-              rotateSpeed={0.5}
-              touches={{
-                ONE: 0, // Single finger rotates
-                TWO: 1  // Two fingers zoom
+              rotateSpeed={3}
+              zoomSpeed={1.2}
+              dynamicDampingFactor={0.1}
+              onChange={(e) => {
+                // Slow rotation as you zoom in so markers don't fly past your finger
+                const c = e?.target as TrackballControlsType | undefined
+                if (!c) return
+                const d = c.object.position.length()
+                c.rotateSpeed = Math.min(3, 3 * ((d - 2) / 28))
               }}
-              mouseButtons={{
-                LEFT: 0, // Left mouse rotates
-                MIDDLE: 1, // Middle mouse zooms
-                RIGHT: undefined // Right mouse disabled
-              }}
-              enableDamping={true}
-              dampingFactor={0.05}
-              autoRotate={false}
             />
             <Environment preset="sunset" />
           </Suspense>
@@ -180,6 +223,31 @@ export default function Page() {
 
         {/* Spinning wireframe in the globe's place until it's ready, then fades out */}
         <GlobeSkeleton visible={!isGlobeLoaded || (webGLSupported !== false && !skeletonMinElapsed)} />
+
+        {/* Shown while a selected species' marker is still loading */}
+        {locatingName && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 bg-white/90 backdrop-blur-md border border-white/40 rounded-full shadow-lg text-sm text-slate-700 max-w-[calc(100%-2rem)]"
+          >
+            <span className="w-4 h-4 shrink-0 rounded-full border-2 border-slate-300 border-t-emerald-500 animate-spin" aria-hidden />
+            <span className="truncate">Locating {locatingName}&hellip;</span>
+          </div>
+        )}
+
+        {/* Zoom buttons, stacked above the help button */}
+        {webGLSupported && (
+          <div className="absolute bottom-16 right-4 lg:bottom-20 lg:right-6 z-10 flex flex-col rounded-full overflow-hidden border border-white/40 shadow-lg divide-y divide-slate-200/70">
+            <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.7)} className="w-10 h-10 lg:w-12 lg:h-12 bg-white/80 backdrop-blur-md hover:bg-white/90 active:bg-white transition-colors flex items-center justify-center text-slate-700 text-xl font-medium">+</button>
+            <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1 / 0.7)} className="w-10 h-10 lg:w-12 lg:h-12 bg-white/80 backdrop-blur-md hover:bg-white/90 active:bg-white transition-colors flex items-center justify-center text-slate-700 text-xl font-medium">&minus;</button>
+            <button type="button" aria-label="Reset view" title="Reset view" onClick={resetView} className="w-10 h-10 lg:w-12 lg:h-12 bg-white/80 backdrop-blur-md hover:bg-white/90 active:bg-white transition-colors flex items-center justify-center text-slate-700 text-xl font-medium">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M4.6 15a8 8 0 1 0 1.9-8.3L4 9" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {/* Help Icon */}
         <div className="absolute bottom-4 right-4 lg:bottom-6 lg:right-6 z-10">
@@ -197,7 +265,7 @@ export default function Page() {
             </div>
                 <div className="flex items-center gap-2 lg:gap-3 text-xs lg:text-sm text-slate-600">
                   <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-green-400 rounded-full"></div>
-              <span>Scroll to zoom</span>
+              <span>Scroll or pinch to zoom</span>
             </div>
                 <div className="flex items-center gap-2 lg:gap-3 text-xs lg:text-sm text-slate-600">
                   <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-green-400 rounded-full"></div>

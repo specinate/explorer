@@ -607,7 +607,7 @@ class iNaturalistAPI {
     try {
       // Make a single API call for all species observations
       const taxonIdQuery = taxonIds.join(',');
-      const response = await fetch(`${this.baseURL}/observations?taxon_id=${taxonIdQuery}&per_page=${perPage * taxonIds.length}&has_geo=true&captive=false&order=desc&order_by=created_at`);
+      const response = await fetch(`${this.baseURL}/observations?taxon_id=${taxonIdQuery}&per_page=${perPage * taxonIds.length}&has_geo=true&captive=false&quality_grade=research&order=desc&order_by=observed_on`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -840,7 +840,7 @@ class iNaturalistAPI {
 
     try {
       const response = await fetch(
-        `${this.baseURL}/observations?taxon_id=${taxonId}&per_page=1&has_geo=true&captive=false&quality_grade=research,needs_id&order=desc&order_by=observed_on`
+        `${this.baseURL}/observations?taxon_id=${taxonId}&per_page=1&has_geo=true&captive=false&quality_grade=research&order=desc&order_by=observed_on`
       );
 
       if (!response.ok) {

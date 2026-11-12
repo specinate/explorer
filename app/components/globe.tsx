@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, forwardRef, useImperativeHandle, useState, useEffect } from "react"
-import { useFrame } from "@react-three/fiber"
+import { useFrame, useThree } from "@react-three/fiber"
 import { Sphere, Html } from "@react-three/drei"
 import { useTexture } from "@react-three/drei"
 import * as THREE from "three"
@@ -163,8 +163,10 @@ export const HOTSPOT_DATA: Record<
 }
 
 interface GlobeRef {
-  // Returns false when the species has no marker (no wild sighting with a location)
-  rotateToHotspot: (hotspotId: string) => boolean
+  // Resolves once the marker's location is known: 'rotated' when the globe turns to it,
+  // 'no-marker' when the species has no mappable sighting, 'superseded' if another
+  // selection came in first
+  rotateToHotspot: (hotspotId: string) => Promise<RotateResult>
 }
 
 interface GlobeProps {
@@ -175,6 +177,8 @@ interface GlobeProps {
   globeSpecies: iNaturalistTaxon[]
   onGlobeLoad?: () => void
 }
+
+export type RotateResult = 'rotated' | 'no-marker' | 'superseded'
 
 const MARKER_RADIUS = 2.1
 
@@ -201,8 +205,14 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
   ref,
 ) {
   const globeRef = useRef<THREE.Group>(null)
-  const targetRotation = useRef<number | null>(null)
-  const isRotating = useRef(false)
+  const { camera } = useThree()
+  // Camera swing toward a selected marker: the full turn, the camera's start pose, and progress
+  const cameraSwing = useRef<{
+    turn: THREE.Quaternion
+    fromPosition: THREE.Vector3
+    fromUp: THREE.Vector3
+    progress: number
+  } | null>(null)
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
   // Cleanup timeout on unmount
@@ -227,11 +237,55 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
   // Kept across searches and "Show more" so nothing is fetched twice
   const placementsRef = useRef(new Map<number, [number, number, number] | null>())
 
+  // A selection waiting on its marker's location to load
+  const pendingRotationRef = useRef<{ id: string; resolve: (r: RotateResult) => void } | null>(null)
+
+  const rotateToPosition = (position: [number, number, number]) => {
+    // Swing the camera round the globe until the marker faces it; works from any viewing
+    // angle, since the controls let the camera tumble freely
+    const globe = globeRef.current
+    if (!globe) return
+    const markerDir = new THREE.Vector3(...position).applyMatrix4(globe.matrixWorld).normalize()
+    const cameraDir = camera.position.clone().normalize()
+    cameraSwing.current = {
+      turn: new THREE.Quaternion().setFromUnitVectors(cameraDir, markerDir),
+      fromPosition: camera.position.clone(),
+      fromUp: camera.up.clone(),
+      progress: 0,
+    }
+  }
+
+  // Settle a waiting selection once placements are known (or loading failed)
+  const settlePendingRotation = (loadedIds: Set<number>, failed = false) => {
+    const pending = pendingRotationRef.current
+    if (!pending) return
+    const taxonId = Number(pending.id.replace('dynamic-', ''))
+    const position = placementsRef.current.get(taxonId)
+    if (position) {
+      rotateToPosition(position)
+      pending.resolve('rotated')
+    } else if (failed || !loadedIds.has(taxonId) || position === null) {
+      pending.resolve('no-marker')
+    } else {
+      return
+    }
+    pendingRotationRef.current = null
+  }
+
   // Create hotspots from search results
   useEffect(() => {
     let cancelled = false
 
     const createHotspotsFromSpecies = async () => {
+      try {
+        await placeSpecies()
+      } catch (error) {
+        console.error('Failed to place species markers:', error)
+        if (!cancelled) settlePendingRotation(new Set(), true)
+      }
+    }
+
+    const placeSpecies = async () => {
       const species = globeSpecies.slice(0, MAX_MARKERS)
       const placements = placementsRef.current
       const missingIds = species.map((taxon) => taxon.id).filter((id) => !placements.has(id))
@@ -276,6 +330,7 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
           taxon,
         }]
       }))
+      settlePendingRotation(new Set(species.map((taxon) => taxon.id)))
     }
 
     createHotspotsFromSpecies()
@@ -296,32 +351,38 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
 
   useImperativeHandle(ref, () => ({
     rotateToHotspot: (hotspotId: string) => {
-        const hotspot = dynamicHotspots.find((h) => h.id === hotspotId)
-        if (!hotspot) return false
-        // Rotation about Y that brings the marker round to face the camera (+Z)
-        const [x, , z] = hotspot.position
-        targetRotation.current = Math.atan2(-x, z)
-        isRotating.current = true
-        return true
+      pendingRotationRef.current?.resolve('superseded')
+      pendingRotationRef.current = null
+      const hotspot = dynamicHotspots.find((h) => h.id === hotspotId)
+      if (hotspot) {
+        rotateToPosition(hotspot.position)
+        return Promise.resolve<RotateResult>('rotated')
+      }
+      const taxonId = Number(hotspotId.replace('dynamic-', ''))
+      if (placementsRef.current.get(taxonId) === null) {
+        return Promise.resolve<RotateResult>('no-marker')
+      }
+      // Marker still loading; settled when the placement effect finishes
+      return new Promise<RotateResult>((resolve) => {
+        pendingRotationRef.current = { id: hotspotId, resolve }
+      })
     },
   }))
 
   useFrame((state, delta) => {
-    if (globeRef.current) {
-      if (isRotating.current && targetRotation.current !== null) {
-        const diff = targetRotation.current - globeRef.current.rotation.y
-        const normalizedDiff = Math.atan2(Math.sin(diff), Math.cos(diff))
-
-        if (Math.abs(normalizedDiff) < 0.01) {
-          globeRef.current.rotation.y = targetRotation.current
-          isRotating.current = false
-          targetRotation.current = null
-        } else {
-          globeRef.current.rotation.y += normalizedDiff * delta * 2
-        }
-      } else {
-        globeRef.current.rotation.y += delta * 0.05
-      }
+    const swing = cameraSwing.current
+    if (swing) {
+      // About one second, easing out
+      swing.progress = Math.min(1, swing.progress + delta)
+      const eased = 1 - Math.pow(1 - swing.progress, 3)
+      const step = new THREE.Quaternion().slerp(swing.turn, eased)
+      camera.position.copy(swing.fromPosition).applyQuaternion(step)
+      camera.up.copy(swing.fromUp).applyQuaternion(step)
+      camera.lookAt(0, 0, 0)
+      if (swing.progress >= 1) cameraSwing.current = null
+    } else if (globeRef.current) {
+      // Slow idle spin, paused while the camera swings so the marker doesn't drift away
+      globeRef.current.rotation.y += delta * 0.05
     }
   })
 
