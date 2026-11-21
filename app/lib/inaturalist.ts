@@ -1,3 +1,13 @@
+/**
+ * Shared iNaturalist types, IUCN presentation helpers, and the browser-side
+ * client for our own API routes.
+ *
+ * Everything here is safe to ship: data shapes, the published IUCN category
+ * table, and colour/label lookups the components need during render. The query
+ * strategies and our conservation heuristics live in inaturalist-server.ts,
+ * which is `server-only` and reachable only through app/api/.
+ */
+
 export interface iNaturalistTaxon {
   id: number;
   name: string;
@@ -45,32 +55,6 @@ export interface iNaturalistObservation {
   };
 }
 
-// Latitude/longitude of a sighting, or null if it has no usable coordinates
-export function getSightingLatLng(obs: iNaturalistObservation): { lat: number; lng: number } | null {
-  const coords = obs.geojson?.coordinates;
-  if (coords && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
-    return { lat: coords[1], lng: coords[0] };
-  }
-  const [lat, lng] = (obs.location ?? '').split(',').map(Number);
-  if (Number.isFinite(lat) && Number.isFinite(lng) && obs.location) {
-    return { lat, lng };
-  }
-  return null;
-}
-
-export interface iNaturalistPlace {
-  id: number;
-  name: string;
-  display_name: string;
-  location: [number, number];
-  bbox: [number, number, number, number];
-  place_type: number;
-  geometry_geojson?: {
-    type: string;
-    coordinates: unknown;
-  };
-}
-
 export interface ConservationDetail {
   place?: {
     name: string;
@@ -82,856 +66,174 @@ export interface ConservationDetail {
   }>;
 }
 
-// IUCN Status mapping
-export const IUCN_STATUS_MAPPING: Record<string, string> = {
-  'CR': 'Critically Endangered',
-  'EN': 'Endangered', 
-  'VU': 'Vulnerable',
-  'NT': 'Near Threatened',
-  'LC': 'Least Concern',
-  'DD': 'Data Deficient',
-  'NE': 'Not Evaluated',
-  'EW': 'Extinct in the Wild',
-  'EX': 'Extinct'
-};
-
-// Solid pill styles for showing a species' status, in the IUCN Red List's own colours
-const STATUS_BADGE_STYLES: Record<string, string> = {
-  'Critically Endangered': 'bg-iucn-cr text-white',
-  'Endangered': 'bg-iucn-en text-neutral-900',
-  'Vulnerable': 'bg-iucn-vu text-neutral-900',
-  'Near Threatened': 'bg-iucn-nt text-neutral-900',
-  'Least Concern': 'bg-iucn-lc text-neutral-900',
-};
-
-// "Not Evaluated" here usually means iNaturalist has no status on file, not that the
-// species is low risk, so present it as missing information rather than a rating
-export function getStatusBadge(status: string): { label: string; className: string } {
-  if (status === 'Not Evaluated') {
-    return { label: 'Not assessed', className: 'bg-gray-500/80 text-white' };
-  }
-  return { label: status, className: STATUS_BADGE_STYLES[status] || 'bg-gray-500/80 text-white' };
+export interface LatLng {
+  lat: number;
+  lng: number;
 }
 
-// Globe marker colours: the IUCN Red List category colours (same as --iucn-* in globals.css)
-const STATUS_MARKER_COLORS: Record<string, string> = {
-  'Critically Endangered': '#d81e05',
-  'Endangered': '#fc7f3f',
-  'Vulnerable': '#f9e814',
-  'Near Threatened': '#cce226',
-  'Least Concern': '#60c659',
+/** Latitude/longitude of a sighting, or null if it has no usable coordinates. */
+export function getSightingLatLng(obs: iNaturalistObservation): LatLng | null {
+  const coords = obs.geojson?.coordinates;
+  if (coords && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+    return { lat: coords[1], lng: coords[0] };
+  }
+  const [lat, lng] = (obs.location ?? "").split(",").map(Number);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && obs.location) {
+    return { lat, lng };
+  }
+  return null;
+}
+
+/* ------------------------------- IUCN tables ------------------------------ */
+
+export const IUCN_STATUS_MAPPING: Record<string, string> = {
+  CR: "Critically Endangered",
+  EN: "Endangered",
+  VU: "Vulnerable",
+  NT: "Near Threatened",
+  LC: "Least Concern",
+  DD: "Data Deficient",
+  NE: "Not Evaluated",
+  EW: "Extinct in the Wild",
+  EX: "Extinct",
 };
 
-// Short IUCN codes, e.g. "Endangered" -> "EN"
+/** Short IUCN codes, e.g. "Endangered" -> "EN". */
 export const IUCN_CODE_BY_STATUS: Record<string, string> = Object.fromEntries(
   Object.entries(IUCN_STATUS_MAPPING).map(([code, name]) => [name, code]),
 );
 
-export function getStatusMarkerColor(status: string): string {
-  return STATUS_MARKER_COLORS[status] || '#9ca3af';
-}
-
-// iNaturalist's numeric `iucn` field -> IUCN category code
+/** iNaturalist's numeric `iucn` field -> IUCN category code. */
 const IUCN_CODE_BY_RANK: Record<number, string> = {
-  0: 'NE', 5: 'DD', 10: 'LC', 20: 'NT', 30: 'VU', 40: 'EN', 50: 'CR', 60: 'EW', 70: 'EX',
+  0: "NE",
+  5: "DD",
+  10: "LC",
+  20: "NT",
+  30: "VU",
+  40: "EN",
+  50: "CR",
+  60: "EW",
+  70: "EX",
 };
 
-// Iconic groups that aren't animals; /taxa/autocomplete ignores the iconic_taxa filter
-const NON_ANIMAL_GROUPS = new Set(['Plantae', 'Fungi', 'Chromista', 'Protozoa']);
-
-export const IUCN_COLOR_MAPPING: Record<string, string> = {
-  // Formal IUCN Statuses
-  'Critically Endangered': 'bg-red-100 text-red-700',
-  'Endangered': 'bg-orange-100 text-orange-700',
-  'Vulnerable': 'bg-yellow-100 text-yellow-700',
-  'Near Threatened': 'bg-blue-100 text-blue-700',
-  'Least Concern': 'bg-green-100 text-green-700',
-  'Data Deficient': 'bg-gray-100 text-gray-700',
-  'Not Evaluated': 'bg-gray-100 text-gray-700',
-  
-  // Observation-Based Statuses (IUCN Coverage Gap Solution)
-  'Widespread Species': 'bg-green-100 text-green-700',
-  'Common Species': 'bg-green-100 text-green-700',
-  'Moderately Observed': 'bg-blue-100 text-blue-700',
-  'Uncommon Species': 'bg-yellow-100 text-yellow-700',
-  'Rarely Observed': 'bg-orange-100 text-orange-700',
-  'No Observations': 'bg-red-100 text-red-700'
+/** Solid pill styles for a species' status, in the IUCN Red List's own colours. */
+const STATUS_BADGE_STYLES: Record<string, string> = {
+  "Critically Endangered": "bg-iucn-cr text-white",
+  Endangered: "bg-iucn-en text-neutral-900",
+  Vulnerable: "bg-iucn-vu text-neutral-900",
+  "Near Threatened": "bg-iucn-nt text-neutral-900",
+  "Least Concern": "bg-iucn-lc text-neutral-900",
 };
 
-// Cache configuration
-const CACHE_DURATION = 8 * 24 * 60 * 60 * 1000; // 8 days in milliseconds
-
-interface CacheEntry<T> {
-  data: T;
-  timestamp: number;
-  expiresAt: number;
+/**
+ * "Not Evaluated" here usually means iNaturalist has no status on file, not
+ * that the species is low risk, so present it as missing information rather
+ * than a rating.
+ */
+export function getStatusBadge(status: string): { label: string; className: string } {
+  if (status === "Not Evaluated") {
+    return { label: "Not assessed", className: "bg-gray-500/80 text-white" };
+  }
+  return {
+    label: status,
+    className: STATUS_BADGE_STYLES[status] || "bg-gray-500/80 text-white",
+  };
 }
 
-class CacheManager {
-  private cache = new Map<string, CacheEntry<unknown>>();
+/** Globe marker colours: IUCN category colours (same as --iucn-* in globals.css). */
+const STATUS_MARKER_COLORS: Record<string, string> = {
+  "Critically Endangered": "#d81e05",
+  Endangered: "#fc7f3f",
+  Vulnerable: "#f9e814",
+  "Near Threatened": "#cce226",
+  "Least Concern": "#60c659",
+};
 
-  set<T>(key: string, data: T): void {
-    const now = Date.now();
-    this.cache.set(key, {
-      data,
-      timestamp: now,
-      expiresAt: now + CACHE_DURATION
-    });
-  }
+export function getStatusMarkerColor(status: string): string {
+  return STATUS_MARKER_COLORS[status] || "#9ca3af";
+}
 
-  get<T>(key: string): T | null {
-    const entry = this.cache.get(key);
-    if (!entry) {
-      return null;
-    }
+/**
+ * IUCN code (e.g. "EN") for a taxon. Prefers the numeric `iucn` field, which
+ * iNaturalist fills for every authority; status codes vary in case and aren't
+ * IUCN categories for other authorities.
+ */
+export function getIUCNCodeForTaxon(taxon: iNaturalistTaxon): string | null {
+  const cs = taxon.conservation_status;
+  if (!cs) return null;
+  if (cs.iucn !== undefined && IUCN_CODE_BY_RANK[cs.iucn]) return IUCN_CODE_BY_RANK[cs.iucn];
+  const code = cs.status?.toUpperCase();
+  return code && IUCN_STATUS_MAPPING[code] ? code : null;
+}
 
-    const now = Date.now();
-    if (now > entry.expiresAt) {
-      this.cache.delete(key);
-      return null;
-    }
+export function getIUCNStatus(taxon: iNaturalistTaxon): string {
+  const code = getIUCNCodeForTaxon(taxon);
+  return code ? IUCN_STATUS_MAPPING[code] : "Not Evaluated";
+}
 
-    return entry.data as T;
-  }
+/* --------------------------- Browser API client --------------------------- */
 
-  has(key: string): boolean {
-    const entry = this.cache.get(key);
-    if (!entry) {
-      return false;
-    }
-
-    const now = Date.now();
-    if (now > entry.expiresAt) {
-      this.cache.delete(key);
-      return false;
-    }
-
-    return true;
-  }
-
-  clear(): void {
-    this.cache.clear();
-  }
-
-  // Clean up expired entries
-  cleanup(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.cache.entries()) {
-      if (now > entry.expiresAt) {
-        this.cache.delete(key);
-      }
-    }
-  }
-
-  // Get cache statistics
-  getStats(): { size: number; entries: Array<{ key: string; age: number; expiresIn: number }> } {
-    const now = Date.now();
-    const entries = Array.from(this.cache.entries()).map(([key, entry]) => ({
-      key,
-      age: now - entry.timestamp,
-      expiresIn: entry.expiresAt - now
-    }));
-
-    return {
-      size: this.cache.size,
-      entries
-    };
+/** GET one of our own routes, returning `fallback` on any failure. */
+async function get<T>(path: string, fallback: T): Promise<T> {
+  try {
+    const response = await fetch(path, { headers: { Accept: "application/json" } });
+    if (!response.ok) return fallback;
+    return (await response.json()) as T;
+  } catch (error) {
+    console.error(`Request failed: ${path}`, error);
+    return fallback;
   }
 }
 
-class iNaturalistAPI {
-  private baseURL = 'https://api.inaturalist.org/v1';
-  private cache = new CacheManager();
-
-  constructor() {
-    // Clean up expired cache entries every hour
-    setInterval(() => {
-      this.cache.cleanup();
-    }, 60 * 60 * 1000);
-  }
-  
-  async searchSpecies(query: string, perPage: number = 50, iucnStatus?: string): Promise<iNaturalistTaxon[]> {
-    const cacheKey = `search_species_${query}_${perPage}_${iucnStatus || 'all'}`;
-    
-    // Check cache first
-    const cachedResult = this.cache.get<iNaturalistTaxon[]>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    // Status filter as IUCN codes; accepts codes ("CR,EN,VU") or a name ("Endangered")
-    const statusCodes = !iucnStatus || iucnStatus === 'all'
-      ? []
-      : iucnStatus.split(',').map((value) => this.getIUCNCode(value.trim()) || value.trim().toUpperCase());
-
-    try {
-      let results: iNaturalistTaxon[];
-
-      if (query) {
-        // Autocomplete ranks by name match ("tiger" -> Tiger); /taxa ranks by observation
-        // count and buries it. It returns 30 per page and ignores iconic_taxa, so fetch a few
-        // pages and keep the animals; status is filtered here since it can't filter by it
-        const pages = await Promise.all([1, 2, 3].map(async (page) => {
-          const params = new URLSearchParams({ q: query, rank: 'species', is_active: 'true', per_page: '30', page: String(page) });
-          const response = await fetch(`${this.baseURL}/taxa/autocomplete?${params}`);
-          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-          return ((await response.json()).results || []) as iNaturalistTaxon[];
-        }));
-        const seen = new Set<number>();
-        results = pages.flat().filter((taxon) => {
-          if (seen.has(taxon.id)) return false;
-          seen.add(taxon.id);
-          return !!taxon.iconic_taxon_name && !NON_ANIMAL_GROUPS.has(taxon.iconic_taxon_name) &&
-            (statusCodes.length === 0 || statusCodes.includes(this.getIUCNCodeForTaxon(taxon) ?? ''));
-        }).slice(0, perPage);
-      } else if (statusCodes.length > 0) {
-        // /taxa ignores status filters; species counts from observations honor csi
-        const params = new URLSearchParams({
-          csi: statusCodes.join(','),
-          iconic_taxa: 'Animalia',
-          rank: 'species',
-          per_page: perPage.toString(),
-        });
-        const response = await fetch(`${this.baseURL}/observations/species_counts?${params}`);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        results = ((await response.json()).results || []).map((row: { taxon: iNaturalistTaxon }) => row.taxon);
-      } else {
-        const params = new URLSearchParams({
-          per_page: perPage.toString(),
-          order: 'desc',
-          order_by: 'observations_count',
-          rank: 'species',
-          iconic_taxa: 'Animalia'
-        });
-        const response = await fetch(`${this.baseURL}/taxa?${params}`);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        results = (await response.json()).results || [];
-      }
-
-      this.cache.set(cacheKey, results);
-      return results;
-    } catch (error) {
-      console.error('Error searching species:', error);
-      return [];
-    }
-  }
-
-  async getSpeciesObservations(taxonId: number, perPage: number = 50): Promise<iNaturalistObservation[]> {
-    const cacheKey = `species_observations_${taxonId}_${perPage}`;
-    
-    // Check cache first
-    const cachedResult = this.cache.get<iNaturalistObservation[]>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      const response = await fetch(
-        `${this.baseURL}/observations?taxon_id=${taxonId}&per_page=${perPage}&order=desc&order_by=created_at&quality_grade=research`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const results = data.results || [];
-      
-      // Cache the results
-      this.cache.set(cacheKey, results);
-      
-      return results;
-    } catch (error) {
-      console.error('Error fetching observations:', error);
-      return [];
-    }
-  }
-
-  async getNearbySpecies(lat: number, lng: number, radius: number = 50, perPage: number = 50): Promise<iNaturalistObservation[]> {
-    const cacheKey = `nearby_species_${lat}_${lng}_${radius}_${perPage}`;
-    
-    // Check cache first
-    const cachedResult = this.cache.get<iNaturalistObservation[]>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      const response = await fetch(
-        `${this.baseURL}/observations?lat=${lat}&lng=${lng}&radius=${radius}&per_page=${perPage}&order=desc&order_by=created_at&quality_grade=research`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const results = data.results || [];
-      
-      // Cache the results
-      this.cache.set(cacheKey, results);
-      
-      return results;
-    } catch (error) {
-      console.error('Error fetching nearby species:', error);
-      return [];
-    }
-  }
-
-  async getPlaces(query: string, perPage: number = 50): Promise<iNaturalistPlace[]> {
-    const cacheKey = `places_${query}_${perPage}`;
-    
-    // Check cache first
-    const cachedResult = this.cache.get<iNaturalistPlace[]>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      const response = await fetch(
-        `${this.baseURL}/places?q=${encodeURIComponent(query)}&per_page=${perPage}&place_type=country,state_province,county`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const results = data.results || [];
-      
-      // Cache the results
-      this.cache.set(cacheKey, results);
-      
-      return results;
-    } catch (error) {
-      console.error('Error searching places:', error);
-      return [];
-    }
-  }
+/**
+ * Same surface the components have always used, now backed by our API routes
+ * instead of calling api.inaturalist.org from the browser.
+ */
+export const inaturalistAPI = {
+  async searchSpecies(
+    query: string,
+    perPage = 50,
+    iucnStatus?: string,
+  ): Promise<iNaturalistTaxon[]> {
+    const params = new URLSearchParams({ perPage: String(perPage) });
+    if (query) params.set("q", query);
+    if (iucnStatus && iucnStatus !== "all") params.set("status", iucnStatus);
+    return get<iNaturalistTaxon[]>(`/api/species?${params}`, []);
+  },
 
   async getSpeciesDetails(taxonId: number): Promise<iNaturalistTaxon | null> {
-    const cacheKey = `species_details_${taxonId}`;
-    
-    // Check cache first
-    const cachedResult = this.cache.get<iNaturalistTaxon>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
+    return get<iNaturalistTaxon | null>(`/api/species/${taxonId}`, null);
+  },
 
-    try {
-      const response = await fetch(`${this.baseURL}/taxa/${taxonId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const result = data.results?.[0] || null;
-      
-      // Cache the result
-      if (result) {
-        this.cache.set(cacheKey, result);
-      }
-      
-      return result;
-    } catch (error) {
-      console.error('Error fetching species details:', error);
-      return null;
-    }
-  }
+  async getSpeciesObservations(
+    taxonId: number,
+    perPage = 50,
+  ): Promise<iNaturalistObservation[]> {
+    return get<iNaturalistObservation[]>(
+      `/api/species/${taxonId}/observations?perPage=${perPage}`,
+      [],
+    );
+  },
 
-  // IUCN code (e.g. "EN") for a taxon. Prefers the numeric `iucn` field, which iNaturalist
-  // fills for every authority; status codes vary in case and aren't IUCN for other authorities
-  getIUCNCodeForTaxon(taxon: iNaturalistTaxon): string | null {
-    const cs = taxon.conservation_status;
-    if (!cs) return null;
-    if (cs.iucn !== undefined && IUCN_CODE_BY_RANK[cs.iucn]) return IUCN_CODE_BY_RANK[cs.iucn];
-    const code = cs.status?.toUpperCase();
-    return code && IUCN_STATUS_MAPPING[code] ? code : null;
-  }
+  /** Coordinates for one species' newest wild sighting, or null if it has none. */
+  async getSpeciesPlacement(taxonId: number): Promise<LatLng | null> {
+    return get<LatLng | null>(`/api/species/${taxonId}/placement`, null);
+  },
 
-  getIUCNStatus(taxon: iNaturalistTaxon): string {
-    const code = this.getIUCNCodeForTaxon(taxon);
-    return code ? IUCN_STATUS_MAPPING[code] : 'Not Evaluated';
-  }
+  /**
+   * Coordinates for a batch of species. Ids absent from the result could not be
+   * placed from the batch and need an individual lookup.
+   *
+   * The server shapes this down from megabytes of observation records to a few
+   * hundred bytes, so the browser never sees the raw sightings.
+   */
+  async getBulkSpeciesPlacements(taxonIds: number[]): Promise<Record<number, LatLng>> {
+    if (taxonIds.length === 0) return {};
+    const params = new URLSearchParams({ taxonIds: taxonIds.join(",") });
+    return get<Record<number, LatLng>>(`/api/sightings?${params}`, {});
+  },
 
-  // Get more detailed conservation information
-  async getConservationDetails(taxonId: number): Promise<ConservationDetail[]> {
-    const cacheKey = `conservation_details_${taxonId}`;
-    
-    const cachedResult = this.cache.get<ConservationDetail[]>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      // Try to get conservation status from multiple sources
-      const response = await fetch(`${this.baseURL}/conservation_statuses?taxon_id=${taxonId}`);
-      
-      if (!response.ok) {
-        // Silently handle 404s as many species don't have conservation status data
-        if (response.status === 404) {
-          this.cache.set(cacheKey, []);
-          return [];
-        }
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const results = data.results || [];
-      
-      this.cache.set(cacheKey, results);
-      return results;
-    } catch (error) {
-      // Only log non-404 errors
-      if (error instanceof Error && !error.message.includes('404')) {
-        console.error('Error fetching conservation details:', error);
-      }
-      return [];
-    }
-  }
-
-  // Enhanced IUCN status with comprehensive fallback logic
-  getEnhancedIUCNStatus(taxon: iNaturalistTaxon, conservationDetails?: ConservationDetail[]): string {
-    // First try the standard conservation_status field
-    const status = this.getIUCNStatus(taxon);
-    if (status !== 'Not Evaluated') {
-      return status;
-    }
-
-    // If we have additional conservation details, look for global status
-    if (conservationDetails && conservationDetails.length > 0) {
-      // Look for global IUCN status first
-      const globalStatus = conservationDetails.find((detail: ConservationDetail) =>
-        detail.place?.name === 'Global' || detail.place?.name === 'Worldwide'
-      );
-      
-      if (globalStatus?.status) {
-        return IUCN_STATUS_MAPPING[globalStatus.status] || globalStatus.status;
-      }
-
-      // Fall back to any available status
-      const anyStatus = conservationDetails.find((detail: ConservationDetail) => detail.status);
-      if (anyStatus?.status) {
-        return IUCN_STATUS_MAPPING[anyStatus.status] || anyStatus.status;
-      }
-    }
-
-    // IUCN Coverage Gap Solution: Use observation-based conservation indicators
-    return this.getObservationBasedStatus(taxon);
-  }
-
-  // Address IUCN coverage gap with observation-based conservation indicators
-  private getObservationBasedStatus(taxon: iNaturalistTaxon): string {
-    const obsCount = taxon.observations_count || 0;
-    
-    // High observation count suggests species is doing well
-    if (obsCount > 10000) {
-      return 'Widespread Species'; // Likely Least Concern equivalent
-    }
-    
-    if (obsCount > 1000) {
-      return 'Common Species'; // Likely doing well
-    }
-    
-    if (obsCount > 100) {
-      return 'Moderately Observed'; // Neutral status
-    }
-    
-    if (obsCount > 10) {
-      return 'Uncommon Species'; // May need attention
-    }
-    
-    if (obsCount > 0) {
-      return 'Rarely Observed'; // Potentially at risk
-    }
-    
-    return 'No Observations'; // Possibly extinct or extremely rare
-  }
-
-  // Get conservation confidence level
-  getConservationConfidence(taxon: iNaturalistTaxon): { level: string; description: string } {
-    // Only give High confidence for actual IUCN assessments (not "Not Evaluated")
-    if (taxon.conservation_status?.status && 
-        taxon.conservation_status.status !== 'NE' && 
-        taxon.conservation_status.status !== 'Not Evaluated') {
-      return {
-        level: 'High',
-        description: 'Formal IUCN assessment available'
-      };
-    }
-
-    const obsCount = taxon.observations_count || 0;
-    
-    // Medium confidence for species with good observation data
-    if (obsCount > 100) {
-      return {
-        level: 'Medium',
-        description: 'Based on observation frequency - species appears stable'
-      };
-    }
-    
-    // Low confidence for species with limited observations
-    if (obsCount > 0) {
-      return {
-        level: 'Low',
-        description: 'Limited data available - IUCN assessment needed'
-      };
-    }
-
-    // Very low confidence for species with no observations
-    return {
-      level: 'Low',
-      description: 'No observation data available'
-    };
-  }
-
-  // Get conservation status explanation for users
-  getConservationExplanation(taxon: iNaturalistTaxon): string {
-    if (taxon.conservation_status?.status) {
-      return `This species has been formally assessed by IUCN (International Union for Conservation of Nature).`;
-    }
-
-    const obsCount = taxon.observations_count || 0;
-    if (obsCount > 1000) {
-      return `This species has not been formally assessed by IUCN, but appears to be doing well based on ${obsCount.toLocaleString()} observations. Only ~7% of species have IUCN assessments.`;
-    }
-
-    return `This species has not been formally assessed by IUCN. With only ~7% of the world's species having IUCN assessments, many species remain unevaluated despite being important for conservation.`;
-  }
-
-  // Bulk fetch observations for multiple species at once
-  async getBulkSpeciesObservations(taxonIds: number[], perPage: number = 5): Promise<Record<number, iNaturalistObservation[]>> {
-    const cacheKey = `bulk_observations_${taxonIds.join(',')}_${perPage}`;
-    
-    const cachedResult = this.cache.get<Record<number, iNaturalistObservation[]>>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      // Make a single API call for all species observations
-      const taxonIdQuery = taxonIds.join(',');
-      const response = await fetch(`${this.baseURL}/observations?taxon_id=${taxonIdQuery}&per_page=${perPage * taxonIds.length}&has_geo=true&captive=false&quality_grade=research&order=desc&order_by=observed_on`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const allObservations = data.results || [];
-      
-      // Group observations by taxon_id
-      const observationsByTaxon: Record<number, iNaturalistObservation[]> = {};
-      
-      // Initialize empty arrays for all taxon IDs
-      taxonIds.forEach(id => {
-        observationsByTaxon[id] = [];
-      });
-      
-      // Group observations by taxon_id
-      allObservations.forEach((obs: iNaturalistObservation) => {
-        if (obs.taxon?.id && observationsByTaxon[obs.taxon.id]) {
-          // Only add if we haven't reached the per-species limit
-          if (observationsByTaxon[obs.taxon.id].length < perPage) {
-            observationsByTaxon[obs.taxon.id].push(obs);
-          }
-        }
-      });
-      
-      this.cache.set(cacheKey, observationsByTaxon);
-      return observationsByTaxon;
-    } catch (error) {
-      console.error('Error fetching bulk species observations:', error);
-      // Return empty arrays for all taxon IDs
-      const emptyResult: Record<number, iNaturalistObservation[]> = {};
-      taxonIds.forEach(id => {
-        emptyResult[id] = [];
-      });
-      return emptyResult;
-    }
-  }
-
-  // Get threats data for a species
-  async getSpeciesThreats(taxonId: number): Promise<Array<{ severity: string }>> {
-    const cacheKey = `species_threats_${taxonId}`;
-    
-    const cachedResult = this.cache.get<Array<{ severity: string }>>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      // Try the conservation statuses endpoint first
-      let response = await fetch(`${this.baseURL}/conservation_statuses?taxon_id=${taxonId}&per_page=100`);
-      
-      if (!response.ok) {
-        // Silently handle 404s as many species don't have conservation status data
-        if (response.status === 404) {
-          // Try fallback approach without logging 404 errors
-          response = await fetch(`${this.baseURL}/taxa/${taxonId}`);
-          
-          if (!response.ok) {
-            // Return empty array for species without data
-            this.cache.set(cacheKey, []);
-            return [];
-          }
-        } else {
-          console.warn(`Conservation statuses endpoint failed with status ${response.status}, trying alternative approach`);
-          
-          // Fallback: Try to get threats from the taxon details endpoint
-          response = await fetch(`${this.baseURL}/taxa/${taxonId}`);
-          
-          if (!response.ok) {
-            console.warn(`Taxon details endpoint also failed with status ${response.status}`);
-            // Return empty array instead of throwing error
-            this.cache.set(cacheKey, []);
-            return [];
-          }
-        }
-      }
-      
-      const data = await response.json();
-      const results = data.results || [];
-      
-      // Extract threats from conservation statuses if available
-      let threats: Array<{ severity: string }> = [];
-      
-      if (results.length > 0 && results[0].threats) {
-        threats = results
-          .filter((status: ConservationDetail) => status.threats && status.threats.length > 0)
-          .flatMap((status: ConservationDetail) => status.threats)
-          .filter((threat: { severity: string }) => threat.severity === 'high' || threat.severity === 'medium')
-          .slice(0, 5);
-      }
-      
-      this.cache.set(cacheKey, threats);
-      return threats;
-    } catch (error) {
-      console.error('Error fetching species threats:', error);
-      // Return empty array instead of throwing error to prevent app crashes
-      this.cache.set(cacheKey, []);
-      return [];
-    }
-  }
-
-  // Get inferred threats based on observation patterns and species characteristics
-  getInferredThreats(taxon: iNaturalistTaxon): string[] {
-    const threats: string[] = [];
-    const obsCount = taxon.observations_count || 0;
-
-    // Low observation count might indicate threats
-    if (obsCount < 100) {
-      threats.push('Limited population visibility');
-    }
-    
-    if (obsCount < 10) {
-      threats.push('Potential rarity or decline');
-    }
-
-    // Habitat-based threats (could be enhanced with habitat data)
-    if (taxon.establishment_means === 'introduced') {
-      threats.push('Invasive species competition');
-    }
-
-    // Common threats for many species
-    threats.push('Habitat loss and fragmentation');
-    threats.push('Climate change impacts');
-
-    return threats.slice(0, 3); // Return top 3 inferred threats
-  }
-
-  // Get threat severity color
-  getThreatSeverityColor(severity: string): string {
-    switch (severity) {
-      case 'high':
-        return 'bg-red-100 text-red-700 border-red-200';
-      case 'medium':
-        return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'low':
-        return 'bg-green-100 text-green-700 border-green-200';
-      default:
-        return 'bg-gray-100 text-gray-700 border-gray-200';
-    }
-  }
-
-  getIUCNColor(status: string): string {
-    return IUCN_COLOR_MAPPING[status] || 'bg-gray-100 text-gray-700';
-  }
-
-  // Get conservation priority based on IUCN status
-  getConservationPriority(status: string): 'critical' | 'high' | 'moderate' | 'low' {
-    switch (status) {
-      case 'Critically Endangered':
-        return 'critical';
-      case 'Endangered':
-        return 'high';
-      case 'Vulnerable':
-      case 'Near Threatened':
-        return 'moderate';
-      default:
-        return 'low';
-    }
-  }
-
-  // Cache management methods
-  getCacheStats() {
-    return this.cache.getStats();
-  }
-
-  clearCache() {
-    this.cache.clear();
-  }
-
-  cleanupCache() {
-    this.cache.cleanup();
-  }
-
-  // Convert IUCN status to API code
-  getIUCNCode(status: string): string | null {
-    const statusMap: Record<string, string> = {
-      'Critically Endangered': 'CR',
-      'Endangered': 'EN',
-      'Vulnerable': 'VU',
-      'Near Threatened': 'NT',
-      'Least Concern': 'LC',
-      'Data Deficient': 'DD',
-      'Not Evaluated': 'NE'
-    };
-    return statusMap[status] || null;
-  }
-
-  // Get popular endangered species for globe markers
-  async getPopularEndangeredSpecies(): Promise<iNaturalistTaxon[]> {
-    const cacheKey = 'popular_endangered_species';
-    
-    const cachedResult = this.cache.get<iNaturalistTaxon[]>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      // Search for endangered animals with high observation counts and geographic data
-      const response = await fetch(
-        `${this.baseURL}/taxa?conservation_status=EN,CR,VU&iconic_taxa=Animalia&rank=species&per_page=50&order=desc&order_by=observations_count&has_geo=true`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const results = data.results || [];
-      
-      this.cache.set(cacheKey, results);
-      
-      return results;
-    } catch (error) {
-      console.error('Error fetching popular endangered species:', error);
-      return [];
-    }
-  }
-
-  // Get species observations with geographic coordinates
-  // Most recent wild sighting with coordinates, for placing a species on the globe.
-  // Includes unconfirmed IDs (needs_id) since rare species often have no research-grade ones
-  async getLatestSighting(taxonId: number): Promise<iNaturalistObservation | null> {
-    const cacheKey = `latest_sighting_${taxonId}`;
-
-    const cachedResult = this.cache.get<iNaturalistObservation>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      const response = await fetch(
-        `${this.baseURL}/observations?taxon_id=${taxonId}&per_page=1&has_geo=true&captive=false&quality_grade=research&order=desc&order_by=observed_on`
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const sighting = data.results?.[0] || null;
-      if (sighting) {
-        this.cache.set(cacheKey, sighting);
-      }
-      return sighting;
-    } catch (error) {
-      console.error('Error fetching latest sighting:', error);
-      return null;
-    }
-  }
-
-  async getSpeciesObservationsWithGeo(taxonId: number, perPage: number = 20): Promise<iNaturalistObservation[]> {
-    const cacheKey = `species_observations_geo_${taxonId}_${perPage}`;
-    
-    const cachedResult = this.cache.get<iNaturalistObservation[]>(cacheKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
-
-    try {
-      const response = await fetch(
-        `${this.baseURL}/observations?taxon_id=${taxonId}&per_page=${perPage}&order=desc&order_by=created_at&quality_grade=research&has_geo=true`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const results = data.results || [];
-      
-      this.cache.set(cacheKey, results);
-      
-      return results;
-    } catch (error) {
-      console.error('Error fetching species observations with geo:', error);
-      return [];
-    }
-  }
-
-  // Force refresh specific data (bypass cache)
-  async searchSpeciesFresh(query: string, perPage: number = 50, iucnStatus?: string): Promise<iNaturalistTaxon[]> {
-    const cacheKey = `search_species_${query}_${perPage}_${iucnStatus || 'all'}`;
-    
-    try {
-      const params = new URLSearchParams({
-        q: query,
-        per_page: perPage.toString(),
-        order: 'desc',
-        order_by: 'observations_count',
-        rank: 'species',
-        iconic_taxa: 'Animalia'
-      });
-
-      if (iucnStatus && iucnStatus !== 'all') {
-        const iucnCode = this.getIUCNCode(iucnStatus);
-        if (iucnCode) {
-          params.append('conservation_status', iucnCode);
-        }
-      }
-
-      const response = await fetch(`${this.baseURL}/taxa?${params}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const results = data.results || [];
-      
-      // Update cache with fresh data
-      this.cache.set(cacheKey, results);
-      
-      return results;
-    } catch (error) {
-      console.error('Error searching species:', error);
-      return [];
-    }
-  }
-}
-
-export const inaturalistAPI = new iNaturalistAPI();
+  // Pure, data already in hand — kept here so render paths don't hit the network
+  getIUCNCodeForTaxon,
+  getIUCNStatus,
+};

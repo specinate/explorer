@@ -7,7 +7,7 @@ import * as THREE from "three"
 import { Hotspot } from "./hotspot"
 import { HotspotTooltip } from "./hotspot-tooltip"
 import { landDots } from "@/app/lib/land"
-import { inaturalistAPI, getSightingLatLng, getStatusMarkerColor, type iNaturalistTaxon } from "@/app/lib/inaturalist"
+import { inaturalistAPI, getStatusMarkerColor, type iNaturalistTaxon } from "@/app/lib/inaturalist"
 
 // Commented out static hotspots - now using only iNaturalist data
 /*
@@ -307,13 +307,13 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
       const missingIds = species.map((taxon) => taxon.id).filter((id) => !placements.has(id))
 
       // One bulk request covers most species, but it returns the newest sightings across
-      // all of them (max ~200), so common species can crowd out rare ones
+      // all of them, so common species can crowd out rare ones
       const unplaced: number[] = []
       for (let i = 0; i < missingIds.length; i += BULK_BATCH_SIZE) {
         const batch = missingIds.slice(i, i + BULK_BATCH_SIZE)
-        const observationsByTaxon = await inaturalistAPI.getBulkSpeciesObservations(batch, 3)
+        const batchPlacements = await inaturalistAPI.getBulkSpeciesPlacements(batch)
         for (const id of batch) {
-          const latLng = (observationsByTaxon[id] || []).map(getSightingLatLng).find(Boolean)
+          const latLng = batchPlacements[id]
           if (latLng) {
             placements.set(id, latLngToPosition(latLng.lat, latLng.lng))
           } else {
@@ -326,8 +326,7 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
       const queue = [...unplaced]
       await Promise.all(Array.from({ length: LOOKUP_CONCURRENCY }, async () => {
         for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
-          const sighting = await inaturalistAPI.getLatestSighting(id)
-          const latLng = sighting && getSightingLatLng(sighting)
+          const latLng = await inaturalistAPI.getSpeciesPlacement(id)
           placements.set(id, latLng ? latLngToPosition(latLng.lat, latLng.lng) : null)
         }
       }))
