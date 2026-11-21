@@ -75,12 +75,12 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
 
   if (!isOpen || !hotspotId || !hotspotId.startsWith('dynamic-')) return null
 
-  const backdrop = "fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-2 sm:p-4"
+  const backdrop = "fixed inset-0 bg-night/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-2 sm:p-4"
 
   if (isLoading) {
     return (
       <div className={backdrop}>
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
+        <div className="bg-deep border border-rule rounded-2xl shadow-2xl p-8">
           <SpecinateLoader size="md" text="Loading species data..." />
         </div>
       </div>
@@ -90,10 +90,10 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
   if (!speciesData) {
     return (
       <div className={backdrop} onClick={onClose}>
-        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md text-center" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-deep border border-rule rounded-2xl shadow-2xl p-8 max-w-md text-center text-frost" onClick={(e) => e.stopPropagation()}>
           <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Species Data Not Available</h3>
-          <p className="text-gray-600 mb-4">
+          <h3 className="font-display text-lg font-bold mb-2">Species Data Not Available</h3>
+          <p className="text-mist mb-4">
             Unable to load detailed information for this species at the moment.
           </p>
           <Button onClick={onClose} variant="outline">Close</Button>
@@ -116,11 +116,11 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
         role="dialog"
         aria-modal="true"
         aria-label={commonName}
-        className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto overflow-x-hidden"
+        className="bg-deep text-frost border border-rule rounded-2xl shadow-2xl shadow-black/60 max-w-xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto overflow-x-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Hero */}
-        <div className="relative h-56 sm:h-72 bg-gray-200">
+        <div className="relative h-56 sm:h-72 bg-night">
           {taxon.default_photo?.medium_url && (
             <img
               src={taxon.default_photo.medium_url}
@@ -129,23 +129,23 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
               onError={(e) => { e.currentTarget.style.display = 'none' }}
             />
           )}
-          <div className="absolute inset-0 bg-linear-to-t from-black/75 via-black/10 to-transparent" />
+          <div className="absolute inset-0 bg-linear-to-t from-deep via-deep/20 to-transparent" />
 
           <button
             onClick={onClose}
             aria-label="Close"
-            className="absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 backdrop-blur-sm transition-colors"
+            className="absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full bg-night/60 text-frost hover:bg-night/80 backdrop-blur-sm transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
 
-          <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5 text-white">
+          <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5 text-frost">
             <span className={`${statusBadge.className} inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold mb-2`}>
               {statusBadge.label}
             </span>
-            <h2 className="text-2xl sm:text-3xl font-bold leading-tight">{commonName}</h2>
+            <h2 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight leading-tight">{commonName}</h2>
             {taxon.preferred_common_name && (
-              <p className="text-sm italic text-white/80">{taxon.name}</p>
+              <p className="text-sm italic text-frost/80">{taxon.name}</p>
             )}
           </div>
         </div>
@@ -155,18 +155,18 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             {group && (
               <div>
-                <div className="text-xs text-gray-500">Group</div>
-                <div className="font-semibold text-gray-900">{group}</div>
+                <div className="text-[11px] uppercase tracking-widest text-mist">Group</div>
+                <div className="font-mono text-frost tabular-nums">{group}</div>
               </div>
             )}
             <div>
-              <div className="text-xs text-gray-500">Observations</div>
-              <div className="font-semibold text-gray-900">{taxon.observations_count?.toLocaleString() || "Unknown"}</div>
+              <div className="text-[11px] uppercase tracking-widest text-mist">Observations</div>
+              <div className="font-mono text-frost tabular-nums">{taxon.observations_count?.toLocaleString() || "Unknown"}</div>
             </div>
             {sightings[0]?.observed_on && (
               <div>
-                <div className="text-xs text-gray-500">Last seen</div>
-                <div className="font-semibold text-gray-900">{formatDate(sightings[0].observed_on)}</div>
+                <div className="text-[11px] uppercase tracking-widest text-mist">Last seen</div>
+                <div className="font-mono text-frost tabular-nums">{formatDate(sightings[0].observed_on)}</div>
               </div>
             )}
           </div>
@@ -174,13 +174,13 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
           {/* About */}
           {summary && (
             <div>
-              <p className="text-sm text-gray-700 leading-relaxed line-clamp-5">{summary}</p>
+              <p className="text-sm text-frost/85 leading-relaxed line-clamp-5">{summary}</p>
               {taxon.wikipedia_url && (
                 <a
                   href={taxon.wikipedia_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block mt-1 text-xs font-medium text-blue-600 hover:text-blue-700"
+                  className="inline-block mt-1 text-xs font-medium text-frost underline-offset-2 hover:underline"
                 >
                   Read more on Wikipedia
                 </a>
@@ -192,12 +192,12 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
           {sightings.length > 0 && (
             <div>
               <div className="flex items-baseline justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-900">Recent sightings</h3>
+                <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-mist">Recent sightings</h3>
                 <a
                   href={`https://www.inaturalist.org/taxa/${taxon.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"
+                  className="flex items-center gap-1 text-xs font-medium text-frost underline-offset-2 hover:underline"
                 >
                   See all on iNaturalist
                   <ExternalLink className="w-3 h-3" aria-hidden />
@@ -210,7 +210,7 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
                     href={`https://www.inaturalist.org/observations/${obs.id}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="group relative aspect-square rounded-lg overflow-hidden bg-gray-100"
+                    className="group relative aspect-square rounded-lg overflow-hidden bg-night"
                   >
                     <img
                       src={mediumPhoto(obs.photos![0].url)}
@@ -237,7 +237,7 @@ export function HotspotModal({ hotspotId, isOpen, onClose }: HotspotModalProps) 
 
           {/* Only needed when there are no sightings to carry the iNaturalist link */}
           {sightings.length === 0 && (
-            <Button asChild className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+            <Button asChild className="w-full bg-frost hover:brightness-110 text-night">
               <a href={`https://www.inaturalist.org/taxa/${taxon.id}`} target="_blank" rel="noopener noreferrer">
                 View on iNaturalist
                 <ExternalLink className="w-4 h-4 ml-1.5" />

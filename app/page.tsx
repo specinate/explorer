@@ -1,16 +1,18 @@
 "use client"
 
 import { Canvas } from "@react-three/fiber"
-import { TrackballControls, Environment } from "@react-three/drei"
+import { TrackballControls } from "@react-three/drei"
 import { Suspense, useState, useRef, useEffect } from "react"
 import { Globe, type RotateResult } from "@/app/components/globe"
-import { StatsBar } from "@/app/components/stats-bar"
 import { SpeciesSearch } from "@/app/components/species-search"
 import { HotspotModal } from "@/app/components/hotspot-modal"
 import { GlobeSkeleton } from "@/app/components/globe-skeleton"
 import type { TrackballControls as TrackballControlsType } from "three-stdlib"
 import { Quaternion } from "three"
-import type { iNaturalistTaxon } from "@/app/lib/inaturalist"
+import { inaturalistAPI, type iNaturalistTaxon } from "@/app/lib/inaturalist"
+import { SightingsRegister } from "@/app/components/sightings-register"
+import { SpecimenTag } from "@/app/components/specimen-tag"
+import Image from "next/image"
 
 function isWebGLAvailable() {
   try {
@@ -129,172 +131,181 @@ export default function Page() {
     requestAnimationFrame(step)
   }
 
+  // On large screens the specimen tag sits beside the globe, so a marker tap just fills it;
+  // on phones the tag is below the fold, so open the full profile instead
   const handleHotspotClick = (hotspotId: string) => {
     setSelectedHotspot(hotspotId)
-    setIsModalOpen(true)
+    const taxonId = Number(hotspotId.replace("dynamic-", ""))
+    const taxon = globeSpecies.find((s) => s.id === taxonId)
+    if (taxon) setSelectedSpecies(taxon)
+    if (!window.matchMedia("(min-width: 1024px)").matches) setIsModalOpen(true)
   }
 
+  // Open with a species on the tag: the first critically endangered one on the globe
+  useEffect(() => {
+    if (selectedSpecies || globeSpecies.length === 0) return
+    const first =
+      globeSpecies.find((s) => inaturalistAPI.getIUCNStatus(s) === "Critically Endangered") ?? globeSpecies[0]
+    setSelectedSpecies(first)
+    setSelectedHotspot(`dynamic-${first.id}`)
+  }, [globeSpecies, selectedSpecies])
+
+  const ctrlBtn = "w-10 h-10 lg:w-11 lg:h-11 flex items-center justify-center text-frost text-xl hover:bg-frost/10 active:bg-frost/15 transition-colors"
+
   return (
-    <main className="relative w-full mobile-full-height overflow-y-auto bg-slate-100 flex flex-col">
-      {/* Background Pattern */}
-      <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2260%22%20height%3D%2260%22%20viewBox%3D%220%200%2060%2060%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Cg%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%3Cg%20fill%3D%22%23ffffff%22%20fill-opacity%3D%220.02%22%3E%3Ccircle%20cx%3D%2230%22%20cy%3D%2230%22%20r%3D%221%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-40"></div>
-
-
-      {/* Header Section - Fixed at Top */}
-      <header className="flex-shrink-0 bg-white/95 backdrop-blur-md border-b border-gray-200/50 px-4 py-3 lg:p-6 relative z-30">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-4">
-            {/* Title and Legend */}
-            <div className="flex-1">
-              <h1 className="text-xl lg:text-4xl xl:text-5xl font-bold text-slate-800 text-balance leading-tight mb-1 lg:mb-3">
-                SpeciNate Species Explorer
+    <main className="w-full min-h-dvh lg:h-dvh bg-night text-frost flex flex-col gap-3 px-[max(16px,env(safe-area-inset-left))] py-3 lg:py-4">
+      <div className="mx-auto w-full max-w-[1480px] flex-1 min-h-0 flex flex-col gap-3">
+        {/* Header: brand and search */}
+        <header className="relative z-30 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <Image src="/android-chrome-192x192.png" alt="" width={40} height={40} className="w-9 h-9 lg:w-10 lg:h-10 rounded-lg shrink-0" priority />
+            <div className="min-w-0">
+              <h1 className="font-display text-xl lg:text-2xl font-extrabold tracking-tight leading-tight">
+                SpeciNate <span className="font-medium text-mist">Explorer</span>
               </h1>
-              <p className="max-w-2xl text-sm lg:text-base leading-snug text-slate-600">
-                Every dot is a real iNaturalist sighting. The{" "}
-                <span className="inline-flex items-center gap-1 font-medium text-red-600">
-                  <span className="w-2 h-2 rounded-full bg-red-500" aria-hidden />
-                  red
-                </span>{" "}
-                ones are running out of time.
+              <p className="text-xs lg:text-sm text-mist leading-snug">
+                Every point is a real iNaturalist sighting. The{" "}
+                <span className="font-semibold text-[#ff5a3c]">red</span> ones are running out of time.
               </p>
-        </div>
-
-            {/* Search Section */}
-            <div className="w-full lg:w-auto lg:max-w-lg">
-              <SpeciesSearch onSelectHotspot={handleSpeciesSelect} onGlobeSpecies={setGlobeSpecies} />
             </div>
+          </div>
+          <div className="w-full lg:w-auto lg:max-w-lg">
+            <SpeciesSearch onSelectHotspot={handleSpeciesSelect} onGlobeSpecies={setGlobeSpecies} />
+          </div>
+        </header>
+
+        {/* Stage: register | globe | specimen tag on large screens; globe first on phones */}
+        <div className="flex-1 min-h-0 flex flex-col gap-3 lg:grid lg:grid-cols-[270px_minmax(0,1fr)_320px] xl:grid-cols-[290px_minmax(0,1fr)_340px]">
+          <div className="order-2 lg:order-none min-h-0 flex flex-col">
+            <SightingsRegister
+              species={globeSpecies}
+              selectedId={selectedSpecies?.id ?? null}
+              onSelect={handleSpeciesSelect}
+            />
+          </div>
+
+          {/* Globe */}
+          <section className="globe-container order-1 lg:order-none relative overflow-hidden rounded-2xl border border-rule bg-[radial-gradient(circle_at_50%_45%,#10303c_0%,transparent_62%)] h-[min(100vw,62vh)] min-h-[320px] max-h-[560px] lg:h-auto lg:max-h-none lg:min-h-0">
+            {webGLSupported === false ? (
+              <div className="absolute inset-0 flex items-center justify-center p-6">
+                <div className="max-w-md text-center space-y-3 rounded-xl border border-rule bg-deep p-6">
+                  <h2 className="font-display text-lg font-bold">3D globe unavailable</h2>
+                  <p className="text-sm text-mist leading-relaxed">
+                    Your browser couldn&apos;t start WebGL, which the globe needs. Try enabling hardware
+                    acceleration in your browser settings, updating your graphics drivers, or using a
+                    different browser. You can still search for species above.
+                  </p>
+                </div>
+              </div>
+            ) : webGLSupported && (
+            <Canvas
+              camera={{ position: [0, 0, 30], fov: 12 }}
+              style={{ touchAction: 'none' }}
+              dpr={[1, 2]}
+              performance={{ min: 0.5 }}
+            >
+              <Suspense fallback={null}>
+                <ambientLight intensity={0.9} />
+                <directionalLight position={[-10, 8, 6]} intensity={1.6} color="#cfe8ee" />
+                <Globe
+                  ref={globeRef}
+                  onHotspotClick={handleHotspotClick}
+                  selectedHotspot={selectedHotspot}
+                  onHotspotHover={setHoveredHotspot}
+                  hoveredHotspot={hoveredHotspot}
+                  globeSpecies={globeSpecies}
+                  onGlobeLoad={() => setIsGlobeLoaded(true)}
+                />
+                {/* Trackball rather than orbit controls so the globe tumbles freely over the poles */}
+                <TrackballControls
+                  ref={controlsRef}
+                  noPan
+                  minDistance={7}
+                  maxDistance={60}
+                  rotateSpeed={3}
+                  zoomSpeed={1.2}
+                  dynamicDampingFactor={0.1}
+                  onChange={(e) => {
+                    // Slow rotation as you zoom in so markers don't fly past your finger
+                    const c = e?.target as TrackballControlsType | undefined
+                    if (!c) return
+                    const d = c.object.position.length()
+                    c.rotateSpeed = Math.min(3, 3 * ((d - 2) / 28))
+                  }}
+                />
+              </Suspense>
+            </Canvas>
+            )}
+
+            {/* Spinning wireframe in the globe's place until it's ready, then fades out */}
+            <GlobeSkeleton visible={!isGlobeLoaded || (webGLSupported !== false && !skeletonMinElapsed)} />
+
+            {/* Shown while a selected species' marker is still loading */}
+            {locatingName && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 rounded-full border border-rule bg-deep/90 backdrop-blur-md text-sm text-frost shadow-lg max-w-[calc(100%-2rem)]"
+              >
+                <span className="w-4 h-4 shrink-0 rounded-full border-2 border-rule border-t-iucn-lc animate-spin" aria-hidden />
+                <span className="truncate">Locating {locatingName}&hellip;</span>
+              </div>
+            )}
+
+            {/* Red List legend */}
+            <ul className="absolute top-3 left-3 z-10 hidden sm:flex flex-col gap-1 pointer-events-none text-[11px] text-mist" aria-label="Marker colours">
+              {[
+                ["CR", "Critically endangered", "bg-iucn-cr"],
+                ["EN", "Endangered", "bg-iucn-en"],
+                ["VU", "Vulnerable", "bg-iucn-vu"],
+                ["NT", "Near threatened", "bg-iucn-nt"],
+                ["LC", "Least concern", "bg-iucn-lc"],
+              ].map(([code, label, bg]) => (
+                <li key={code} className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${bg}`} aria-hidden />
+                  <span className="font-mono text-frost/80">{code}</span>
+                  <span>{label}</span>
+                </li>
+              ))}
+            </ul>
+
+            {/* Zoom, reset and help */}
+            {webGLSupported && (
+              <div className="absolute bottom-3 right-3 z-10 flex flex-col rounded-xl overflow-hidden border border-rule bg-deep/85 backdrop-blur-md divide-y divide-rule">
+                <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.7)} className={ctrlBtn}>+</button>
+                <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1 / 0.7)} className={ctrlBtn}>&minus;</button>
+                <button type="button" aria-label="Reset view" title="Reset view" onClick={resetView} className={ctrlBtn}>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M4.6 15a8 8 0 1 0 1.9-8.3L4 9" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
+            <p className="absolute bottom-3 left-3 z-10 hidden sm:block pointer-events-none text-xs text-mist">
+              Drag to turn · scroll or pinch to zoom · tap a point
+            </p>
+          </section>
+
+          {/* Specimen tag */}
+          <aside className="order-3 lg:order-none min-h-0 lg:overflow-y-auto flex flex-col gap-3 lg:pb-1" aria-live="polite">
+            <SpecimenTag species={selectedSpecies} onOpenProfile={() => setIsModalOpen(true)} />
+            <footer className="mt-auto pt-2 text-[11px] leading-snug text-mist">
+              © {new Date().getFullYear()} SpeciNate Conservation LLC. Need help?{" "}
+              <a href="mailto:corianoharris@specinate.com" className="font-medium text-frost underline-offset-2 hover:underline">
+                corianoharris@specinate.com
+              </a>
+            </footer>
+          </aside>
         </div>
       </div>
-      </header>
-
-      {/* Species Globe Section */}
-      <section className="globe-container flex-1 relative min-h-0 min-h-[50vh]">
-        {webGLSupported === false ? (
-          <div className="absolute inset-0 flex items-center justify-center p-6">
-            <div className="max-w-md text-center space-y-3 bg-white/90 border border-gray-200 rounded-xl shadow-lg p-6">
-              <h2 className="text-lg font-semibold text-slate-800">3D globe unavailable</h2>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                Your browser couldn&apos;t start WebGL, which the globe needs. Try enabling hardware
-                acceleration in your browser settings, updating your graphics drivers, or using a
-                different browser. You can still search for species above.
-              </p>
-            </div>
-          </div>
-        ) : webGLSupported && (
-        <Canvas
-          camera={{ position: [0, 0, 30], fov: 12 }}
-          style={{ touchAction: 'none' }}
-          dpr={[1, 2]}
-          performance={{ min: 0.5 }}
-        >
-          <Suspense fallback={null}>
-            <ambientLight intensity={0.5} />
-            <directionalLight position={[10, 10, 5]} intensity={1} />
-            <Globe
-              ref={globeRef}
-              onHotspotClick={handleHotspotClick}
-              selectedHotspot={selectedHotspot}
-              onHotspotHover={setHoveredHotspot}
-              hoveredHotspot={hoveredHotspot}
-                globeSpecies={globeSpecies}
-              onGlobeLoad={() => setIsGlobeLoaded(true)}
-            />
-            {/* Trackball rather than orbit controls so the globe tumbles freely over the poles */}
-            <TrackballControls
-              ref={controlsRef}
-              noPan
-              minDistance={7}
-              maxDistance={60}
-              rotateSpeed={3}
-              zoomSpeed={1.2}
-              dynamicDampingFactor={0.1}
-              onChange={(e) => {
-                // Slow rotation as you zoom in so markers don't fly past your finger
-                const c = e?.target as TrackballControlsType | undefined
-                if (!c) return
-                const d = c.object.position.length()
-                c.rotateSpeed = Math.min(3, 3 * ((d - 2) / 28))
-              }}
-            />
-            <Environment preset="sunset" />
-          </Suspense>
-        </Canvas>
-        )}
-
-        {/* Spinning wireframe in the globe's place until it's ready, then fades out */}
-        <GlobeSkeleton visible={!isGlobeLoaded || (webGLSupported !== false && !skeletonMinElapsed)} />
-
-        {/* Shown while a selected species' marker is still loading */}
-        {locatingName && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 bg-white/90 backdrop-blur-md border border-white/40 rounded-full shadow-lg text-sm text-slate-700 max-w-[calc(100%-2rem)]"
-          >
-            <span className="w-4 h-4 shrink-0 rounded-full border-2 border-slate-300 border-t-emerald-500 animate-spin" aria-hidden />
-            <span className="truncate">Locating {locatingName}&hellip;</span>
-          </div>
-        )}
-
-        {/* Zoom buttons, stacked above the help button */}
-        {webGLSupported && (
-          <div className="absolute bottom-16 right-4 lg:bottom-20 lg:right-6 z-10 flex flex-col rounded-full overflow-hidden border border-white/40 shadow-lg divide-y divide-slate-200/70">
-            <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.7)} className="w-10 h-10 lg:w-12 lg:h-12 bg-white/80 backdrop-blur-md hover:bg-white/90 active:bg-white transition-colors flex items-center justify-center text-slate-700 text-xl font-medium">+</button>
-            <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1 / 0.7)} className="w-10 h-10 lg:w-12 lg:h-12 bg-white/80 backdrop-blur-md hover:bg-white/90 active:bg-white transition-colors flex items-center justify-center text-slate-700 text-xl font-medium">&minus;</button>
-            <button type="button" aria-label="Reset view" title="Reset view" onClick={resetView} className="w-10 h-10 lg:w-12 lg:h-12 bg-white/80 backdrop-blur-md hover:bg-white/90 active:bg-white transition-colors flex items-center justify-center text-slate-700 text-xl font-medium">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M4.6 15a8 8 0 1 0 1.9-8.3L4 9" />
-              </svg>
-            </button>
-          </div>
-        )}
-
-        {/* Help Icon */}
-        <div className="absolute bottom-4 right-4 lg:bottom-6 lg:right-6 z-10">
-          <button className="group relative w-10 h-10 lg:w-12 lg:h-12 bg-white/80 backdrop-blur-md border border-white/40 rounded-full shadow-lg hover:bg-white/90 transition-all duration-200 flex items-center justify-center">
-            <svg className="w-5 h-5 lg:w-6 lg:h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-
-              {/* Tooltip */}
-            <div className="absolute bottom-full right-0 mb-2 lg:mb-3 w-48 lg:w-56 bg-white/95 backdrop-blur-md border border-white/40 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-              <div className="p-3 lg:p-4 space-y-2 lg:space-y-3">
-                <div className="flex items-center gap-2 lg:gap-3 text-xs lg:text-sm text-slate-600">
-                  <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-green-400 rounded-full"></div>
-                    <span>Drag to rotate</span>
-            </div>
-                <div className="flex items-center gap-2 lg:gap-3 text-xs lg:text-sm text-slate-600">
-                  <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-green-400 rounded-full"></div>
-              <span>Scroll or pinch to zoom</span>
-            </div>
-                <div className="flex items-center gap-2 lg:gap-3 text-xs lg:text-sm text-slate-600">
-                  <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-green-400 rounded-full"></div>
-                    <span>Click hotspots to explore</span>
-                  </div>
-                </div>
-            </div>
-            </button>
-          </div>
-
-        {/* Floating footer; narrower than the section so it clears the help button */}
-        <footer className="absolute left-1/2 -translate-x-1/2 bottom-[max(1rem,env(safe-area-inset-bottom))] lg:bottom-6 z-10 w-max max-w-[calc(100%-7rem)] lg:max-w-[calc(100%-10rem)] px-4 py-2 bg-white/80 backdrop-blur-md border border-white/40 rounded-2xl lg:rounded-full shadow-lg text-center text-[11px] lg:text-xs text-slate-600 leading-snug">
-          <span>© {new Date().getFullYear()} SpeciNate Conservation LLC. All rights reserved.</span>{" "}
-          <span className="whitespace-nowrap">
-            Need help?{" "}
-            <a href="mailto:corianoharris@specinate.com" className="font-medium text-blue-600 hover:text-blue-700 underline-offset-2 hover:underline">
-              corianoharris@specinate.com
-            </a>
-          </span>
-        </footer>
-      </section>
-
 
       {/* Hotspot Modal */}
       <HotspotModal
-        hotspotId={selectedHotspot}
+        hotspotId={selectedSpecies ? `dynamic-${selectedSpecies.id}` : selectedHotspot}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
       />
     </main>
   )
-    }
+}

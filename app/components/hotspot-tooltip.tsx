@@ -2,10 +2,9 @@
 
 import { useState, useEffect, useRef, type ReactNode } from "react"
 import Image from "next/image"
-import { Eye, ExternalLink } from "lucide-react"
-import { Badge } from "@/app/components/ui/badge"
+import { ExternalLink } from "lucide-react"
 // import { HOTSPOT_DATA } from "./globe" // Commented out - using only iNaturalist data
-import { inaturalistAPI, getStatusBadge, type iNaturalistTaxon } from "@/app/lib/inaturalist"
+import { inaturalistAPI, getStatusMarkerColor, IUCN_CODE_BY_STATUS, type iNaturalistTaxon } from "@/app/lib/inaturalist"
 
 interface HotspotTooltipProps {
   hotspotId: string
@@ -119,13 +118,14 @@ export function HotspotTooltip({ hotspotId }: HotspotTooltipProps) {
     if (isLoading || !dynamicData || !imageLoaded) {
       return (
         <TooltipFrame>
-          <div className="w-60 bg-white rounded-xl shadow-2xl ring-1 ring-black/5 relative isolate overflow-hidden" aria-busy="true">
-            <div className="h-28 bg-gray-200 animate-pulse" />
-            <div className="p-3 animate-pulse">
-              <div className="h-4 w-3/4 bg-gray-200 rounded" />
-              <div className="h-3 w-1/2 bg-gray-100 rounded mt-1.5" />
-              <div className="h-3 w-2/5 bg-gray-100 rounded mt-3" />
-              <div className="h-8 w-full bg-gray-100 rounded-lg mt-3" />
+          <div className="w-64 rounded-[6px_6px_6px_16px] bg-lichen p-2.5 shadow-[0_14px_30px_-12px_#000]" aria-busy="true">
+            <div className="flex gap-3 animate-pulse">
+              <div className="w-14 h-14 shrink-0 rounded-md bg-tag-ink/10" />
+              <div className="flex-1 pt-1">
+                <div className="h-3.5 w-4/5 rounded bg-tag-ink/15" />
+                <div className="h-3 w-3/5 rounded bg-tag-ink/10 mt-1.5" />
+                <div className="h-4 w-2/5 rounded bg-tag-ink/10 mt-2" />
+              </div>
             </div>
           </div>
         </TooltipFrame>
@@ -133,59 +133,54 @@ export function HotspotTooltip({ hotspotId }: HotspotTooltipProps) {
     }
 
     const status = inaturalistAPI.getIUCNStatus(dynamicData)
-    const statusBadge = getStatusBadge(status)
+    const code = IUCN_CODE_BY_STATUS[status]
+    const color = getStatusMarkerColor(status)
+    const darkText = code === "EN" || code === "VU" || code === "NT" || code === "LC"
     const commonName = dynamicData.preferred_common_name || dynamicData.name
     const photoUrl = dynamicData.default_photo?.medium_url
 
     return (
       <TooltipFrame>
-        <div className="w-60 bg-white rounded-xl shadow-2xl ring-1 ring-black/5 relative isolate overflow-hidden animate-tooltip-content">
-          {/* Photo header with status pill */}
-          <div className="relative h-28 bg-gray-100">
-            {photoUrl && (
-              <Image
-                src={photoUrl}
-                alt={commonName}
-                fill
-                className="object-cover"
-                sizes="240px"
-              />
-            )}
-            <div className="absolute inset-0 bg-linear-to-t from-black/40 via-transparent to-transparent" />
-            <Badge className={`${statusBadge.className} absolute top-2 left-2 rounded-full px-2 py-0.5 text-[11px] font-semibold shadow-sm backdrop-blur-sm border-0`}>
-              {statusBadge.label}
-            </Badge>
-          </div>
-
-          <div className="p-3">
-            <h3 className="font-semibold text-gray-900 text-sm leading-snug truncate" title={commonName}>
-              {commonName}
-            </h3>
-            {dynamicData.preferred_common_name && (
-              <p className="text-xs italic text-gray-500 truncate">{dynamicData.name}</p>
-            )}
-
-            <div className="flex items-center gap-1.5 mt-2 text-xs text-gray-600">
-              <Eye className="w-3.5 h-3.5 text-gray-400" aria-hidden />
-              <span>
-                <span className="font-medium text-gray-900">
-                  {dynamicData.observations_count?.toLocaleString() || "Unknown"}
-                </span>{" "}
-                observations
-              </span>
+        {/* A small specimen label, matching the species card */}
+        <a
+          href={`https://www.inaturalist.org/taxa/${dynamicData.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group block w-64 rounded-[6px_6px_6px_16px] bg-lichen p-2.5 text-tag-ink shadow-[0_14px_30px_-12px_#000] animate-tooltip-content"
+        >
+          <div className="flex gap-3">
+            <div className="relative w-14 h-14 shrink-0 overflow-hidden rounded-md bg-tag-ink/10">
+              {photoUrl && <Image src={photoUrl} alt="" fill className="object-cover" sizes="56px" />}
             </div>
-
-            <a
-              href={`https://www.inaturalist.org/taxa/${dynamicData.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 flex items-center justify-center gap-1.5 w-full text-xs font-medium bg-blue-600 text-white py-2 px-3 rounded-lg hover:bg-blue-700 transition-colors duration-150"
-            >
-              View on iNaturalist
-              <ExternalLink className="w-3.5 h-3.5" aria-hidden />
-            </a>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-display text-[15px] font-extrabold leading-tight tracking-tight truncate" title={commonName}>
+                {commonName}
+              </h3>
+              {dynamicData.preferred_common_name && (
+                <p className="text-xs italic opacity-75 truncate">{dynamicData.name}</p>
+              )}
+              <div className="mt-1.5 flex items-center gap-2">
+                <span
+                  className="rounded px-1.5 py-px font-mono text-[10.5px] font-medium"
+                  style={{ background: color, color: darkText ? "#1a1a1a" : "#fff" }}
+                  title={status}
+                >
+                  {code && code !== "NE" ? code : "NE"}
+                </span>
+                <span className="font-mono text-[11px] tabular-nums opacity-70">
+                  {dynamicData.observations_count?.toLocaleString() ?? "?"} sightings
+                </span>
+              </div>
+            </div>
           </div>
-        </div>
+          <div className="mt-2 flex items-center justify-between border-t border-tag-ink/15 pt-1.5 text-[11px] font-semibold">
+            <span className="opacity-70">{status === "Not Evaluated" ? "Not yet assessed" : status}</span>
+            <span className="flex items-center gap-1 group-hover:underline">
+              iNaturalist
+              <ExternalLink className="w-3 h-3" aria-hidden />
+            </span>
+          </div>
+        </a>
       </TooltipFrame>
     )
   }

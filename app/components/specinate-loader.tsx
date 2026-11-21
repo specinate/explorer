@@ -37,7 +37,7 @@ export function SpecinateLoader({
         />
       </div>
       {text && (
-        <span className={`${textSizeClasses[size]} text-gray-600 text-center`}>
+        <span className={`${textSizeClasses[size]} text-mist text-center`}>
           {text}
         </span>
       )}

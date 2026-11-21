@@ -95,13 +95,13 @@ export const IUCN_STATUS_MAPPING: Record<string, string> = {
   'EX': 'Extinct'
 };
 
-// Solid pill styles for showing a species' status over a photo
+// Solid pill styles for showing a species' status, in the IUCN Red List's own colours
 const STATUS_BADGE_STYLES: Record<string, string> = {
-  'Critically Endangered': 'bg-red-500 text-white',
-  'Endangered': 'bg-orange-500 text-white',
-  'Vulnerable': 'bg-amber-400 text-amber-950',
-  'Near Threatened': 'bg-sky-500 text-white',
-  'Least Concern': 'bg-emerald-500 text-white',
+  'Critically Endangered': 'bg-iucn-cr text-white',
+  'Endangered': 'bg-iucn-en text-neutral-900',
+  'Vulnerable': 'bg-iucn-vu text-neutral-900',
+  'Near Threatened': 'bg-iucn-nt text-neutral-900',
+  'Least Concern': 'bg-iucn-lc text-neutral-900',
 };
 
 // "Not Evaluated" here usually means iNaturalist has no status on file, not that the
@@ -113,14 +113,19 @@ export function getStatusBadge(status: string): { label: string; className: stri
   return { label: status, className: STATUS_BADGE_STYLES[status] || 'bg-gray-500/80 text-white' };
 }
 
-// Globe marker colors, matching the badge colors above (Tailwind 500 shades)
+// Globe marker colours: the IUCN Red List category colours (same as --iucn-* in globals.css)
 const STATUS_MARKER_COLORS: Record<string, string> = {
-  'Critically Endangered': '#ef4444',
-  'Endangered': '#f97316',
-  'Vulnerable': '#fbbf24',
-  'Near Threatened': '#0ea5e9',
-  'Least Concern': '#10b981',
+  'Critically Endangered': '#d81e05',
+  'Endangered': '#fc7f3f',
+  'Vulnerable': '#f9e814',
+  'Near Threatened': '#cce226',
+  'Least Concern': '#60c659',
 };
+
+// Short IUCN codes, e.g. "Endangered" -> "EN"
+export const IUCN_CODE_BY_STATUS: Record<string, string> = Object.fromEntries(
+  Object.entries(IUCN_STATUS_MAPPING).map(([code, name]) => [name, code]),
+);
 
 export function getStatusMarkerColor(status: string): string {
   return STATUS_MARKER_COLORS[status] || '#9ca3af';
