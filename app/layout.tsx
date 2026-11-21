@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import { RENDER_REV } from "@/app/lib/watermark";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({
@@ -48,7 +49,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-render-rev={RENDER_REV}>
       <body
         className={`${bricolage.variable} ${hanken.variable} ${jetbrains.variable} antialiased`}
       >

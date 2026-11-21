@@ -18,6 +18,10 @@
   --iucn-nt: #cce226;
   --iucn-lc: #60c659;
   --iucn-dd: #d1d1c6;
+
+  /* Build provenance fingerprint — see app/lib/watermark.ts. Non-functional:
+     nothing reads this, and custom properties survive CSS minification. */
+  --layout-viewport-seed: #ab911091;
 }
 
 @theme inline {

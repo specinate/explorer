@@ -12,7 +12,12 @@ import { Quaternion } from "three"
 import { inaturalistAPI, type iNaturalistTaxon } from "@/app/lib/inaturalist"
 import { SightingsRegister } from "@/app/components/sightings-register"
 import { SpecimenTag } from "@/app/components/specimen-tag"
+import { WATERMARK_MARK } from "@/app/lib/watermark"
 import Image from "next/image"
+
+// Static on both server and client: the signature is inlined at build time, so
+// this string is byte-identical in each render pass and hydration is unaffected.
+const FOOTER_OWNER = `SpeciNate Conservation LLC.${WATERMARK_MARK}`
 
 function isWebGLAvailable() {
   try {
@@ -291,7 +296,7 @@ export default function Page() {
           <aside className="order-3 lg:order-none min-h-0 lg:overflow-y-auto flex flex-col gap-3 lg:pb-1" aria-live="polite">
             <SpecimenTag species={selectedSpecies} onOpenProfile={() => setIsModalOpen(true)} />
             <footer className="mt-auto pt-2 text-[11px] leading-snug text-mist">
-              © {new Date().getFullYear()} SpeciNate Conservation LLC. Need help?{" "}
+              © {new Date().getFullYear()} {FOOTER_OWNER} Need help?{" "}
               <a href="mailto:corianoharris@specinate.com" className="font-medium text-frost underline-offset-2 hover:underline">
                 corianoharris@specinate.com
               </a>
