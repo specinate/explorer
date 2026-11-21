@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:watermark": "node scripts/verify-watermark.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

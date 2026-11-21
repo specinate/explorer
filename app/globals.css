@@ -1,28 +1,59 @@
 @import "tailwindcss";
 
+/* Night Atlas: a single dark world. Deep-ocean neutrals, a pale lichen "specimen tag"
+   for the one paper surface, and the IUCN Red List's own category colours. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --night: #07131a;
+  --deep: #0c1f29;
+  --rule: #1d3543;
+  --mist: #8fa8b3;
+  --frost: #e6eef0;
+  --lichen: #dfe6cf;
+  --tag-ink: #1a2a20;
+
+  --iucn-cr: #d81e05;
+  --iucn-en: #fc7f3f;
+  --iucn-vu: #f9e814;
+  --iucn-nt: #cce226;
+  --iucn-lc: #60c659;
+  --iucn-dd: #d1d1c6;
+
+  /* Build provenance fingerprint — see app/lib/watermark.ts. Non-functional:
+     nothing reads this, and custom properties survive CSS minification. */
+  --layout-viewport-seed: #ab911091;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-night: var(--night);
+  --color-deep: var(--deep);
+  --color-rule: var(--rule);
+  --color-mist: var(--mist);
+  --color-frost: var(--frost);
+  --color-lichen: var(--lichen);
+  --color-tag-ink: var(--tag-ink);
+  --color-iucn-cr: var(--iucn-cr);
+  --color-iucn-en: var(--iucn-en);
+  --color-iucn-vu: var(--iucn-vu);
+  --color-iucn-nt: var(--iucn-nt);
+  --color-iucn-lc: var(--iucn-lc);
+  --color-iucn-dd: var(--iucn-dd);
+  --color-background: var(--night);
+  --color-foreground: var(--frost);
+  --font-sans: var(--font-hanken), "Helvetica Neue", system-ui, sans-serif;
+  --font-display: var(--font-bricolage), "Avenir Next", system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--night);
+  color: var(--frost);
+  font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--lichen);
+  outline-offset: 2px;
 }
 
 /* Mobile viewport fixes */
@@ -48,6 +79,21 @@ body {
   touch-action: none;
 }
 
+/* Hide the scrollbar on the swipeable species row (phones) */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Specimen tag: the one paper surface, like a museum label */
+.specimen-tag {
+  background-color: var(--lichen);
+}
+
+@keyframes tag-in {
+  from { transform: translateY(6px) rotate(-1deg); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+.animate-tag-in { animation: tag-in 350ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+
 /* Species tooltip: fade loaded content in over its skeleton */
 @keyframes tooltip-content-in {
   from { opacity: 0; }
@@ -59,7 +105,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-tooltip-content { animation: none; }
+  .animate-tooltip-content,
+  .animate-tag-in { animation: none; }
 }
 
 /* Globe skeleton: meridians sweep across the sphere so it reads as spinning */

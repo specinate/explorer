@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react"
 import { useFrame } from "@react-three/fiber"
 import * as THREE from "three"
+import { Billboard } from "@react-three/drei"
 
 interface HotspotProps {
   position: [number, number, number]
   color: string
+  // Critically endangered markers pulse; the rest hold still so the red ones stand out
+  critical?: boolean
   isSelected: boolean
   onClick: () => void
   onPointerOver: () => void
@@ -28,7 +31,7 @@ function useIsTouchDevice() {
   return isTouch
 }
 
-export function Hotspot({ position, color, isSelected, onClick, onPointerOver, onPointerOut }: HotspotProps) {
+export function Hotspot({ position, color, critical = false, isSelected, onClick, onPointerOver, onPointerOut }: HotspotProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const pulseRef = useRef<THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>>(null)
   const [isHovered, setIsHovered] = useState(false)
@@ -37,15 +40,16 @@ export function Hotspot({ position, color, isSelected, onClick, onPointerOver, o
   const hitRadius = isTouch ? 0.3 : 0.12
 
   useFrame((state) => {
+    if (!critical) return
+    const t = state.clock.elapsedTime
     if (meshRef.current) {
-      const scale = 1 + Math.sin(state.clock.elapsedTime * 2) * 0.2
-      meshRef.current.scale.setScalar(scale)
+      meshRef.current.scale.setScalar(1 + Math.sin(t * 3) * 0.15)
     }
-
     if (pulseRef.current) {
-      const pulseScale = 1 + Math.sin(state.clock.elapsedTime * 2) * 0.5
-      pulseRef.current.scale.setScalar(pulseScale)
-      pulseRef.current.material.opacity = 0.3 - (pulseScale - 1) * 0.3
+      // Ring expands outward and fades, like a sonar ping
+      const phase = (t * 0.7) % 1
+      pulseRef.current.scale.setScalar(1 + phase * 1.6)
+      pulseRef.current.material.opacity = 0.6 * (1 - phase)
     }
   })
 
@@ -77,14 +81,24 @@ export function Hotspot({ position, color, isSelected, onClick, onPointerOver, o
         <meshBasicMaterial color={color} transparent opacity={isSelected ? 1 : 0.9} />
       </mesh>
 
-      {/* Pulsing Ring */}
-      <mesh ref={pulseRef}>
-        <ringGeometry args={[0.1 * markerScale, 0.15 * markerScale, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={0.3} side={THREE.DoubleSide} />
-      </mesh>
+      {/* Pulsing ring on critical markers; a white ring marks the selected one */}
+      <Billboard>
+      {critical && (
+        <mesh ref={pulseRef}>
+          <ringGeometry args={[0.1 * markerScale, 0.13 * markerScale, 32]} />
+          <meshBasicMaterial color={color} transparent opacity={0.5} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      )}
+      {(isSelected || isHovered) && (
+        <mesh>
+          <ringGeometry args={[0.12 * markerScale, 0.145 * markerScale, 32]} />
+          <meshBasicMaterial color="#e6eef0" side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      </Billboard>
 
       {/* Glow Effect */}
-      <pointLight color={color} intensity={isSelected ? 2 : 1} distance={1} />
+      <pointLight color={color} intensity={isSelected ? 0.8 : 0.3} distance={0.6} />
     </group>
   )
 }

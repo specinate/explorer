@@ -10,7 +10,7 @@ export function GlobeSkeleton({ visible }: { visible: boolean }) {
   return (
     <div
       // Opaque so it covers the globe while that loads underneath, then fades to reveal it
-      className={`absolute inset-0 bg-slate-100 flex flex-col items-center justify-center gap-4 pointer-events-none transition-opacity duration-700 ${
+      className={`absolute inset-0 bg-night flex flex-col items-center justify-center gap-4 pointer-events-none transition-opacity duration-700 ${
         visible ? "opacity-100" : "opacity-0"
       }`}
       role="status"
@@ -20,14 +20,14 @@ export function GlobeSkeleton({ visible }: { visible: boolean }) {
       <svg viewBox="-52 -52 104 104" className="h-[63%] max-w-[90%] aspect-square" aria-hidden>
         <defs>
           <radialGradient id="globe-skeleton-fill" cx="35%" cy="30%" r="75%">
-            <stop offset="0%" stopColor="#f8fafc" />
-            <stop offset="100%" stopColor="#cbd5e1" />
+            <stop offset="0%" stopColor="#14404d" />
+            <stop offset="100%" stopColor="#071a22" />
           </radialGradient>
         </defs>
 
         <circle r="50" fill="url(#globe-skeleton-fill)" className="globe-skeleton-pulse" />
 
-        <g fill="none" stroke="#94a3b8" strokeWidth="0.6" opacity="0.7">
+        <g fill="none" stroke="#4f7d6e" strokeWidth="0.6" opacity="0.7">
           {LATITUDES.map((lat) => {
             const rad = (lat * Math.PI) / 180
             return <ellipse key={lat} cy={-Math.sin(rad) * 50} rx={Math.cos(rad) * 50} ry={Math.cos(rad) * 8} />
@@ -45,10 +45,10 @@ export function GlobeSkeleton({ visible }: { visible: boolean }) {
           ))}
         </g>
 
-        <circle r="50" fill="none" stroke="#94a3b8" strokeWidth="0.8" />
+        <circle r="50" fill="none" stroke="#4f7d6e" strokeWidth="0.8" />
       </svg>
 
-      <p className="text-sm text-slate-500">Loading the globe…</p>
+      <p className="text-sm text-mist">Loading the globe…</p>
     </div>
   )
 }

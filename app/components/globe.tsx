@@ -1,13 +1,13 @@
 "use client"
 
-import { useRef, forwardRef, useImperativeHandle, useState, useEffect } from "react"
+import { useRef, forwardRef, useImperativeHandle, useState, useEffect, useMemo } from "react"
 import { useFrame, useThree } from "@react-three/fiber"
 import { Sphere, Html } from "@react-three/drei"
-import { useTexture } from "@react-three/drei"
 import * as THREE from "three"
 import { Hotspot } from "./hotspot"
 import { HotspotTooltip } from "./hotspot-tooltip"
-import { inaturalistAPI, getSightingLatLng, getStatusMarkerColor, type iNaturalistTaxon } from "@/app/lib/inaturalist"
+import { landDots } from "@/app/lib/land"
+import { inaturalistAPI, getStatusMarkerColor, type iNaturalistTaxon } from "@/app/lib/inaturalist"
 
 // Commented out static hotspots - now using only iNaturalist data
 /*
@@ -182,15 +182,15 @@ export type RotateResult = 'rotated' | 'no-marker' | 'superseded'
 
 const MARKER_RADIUS = 2.1
 
-// Matches how SphereGeometry wraps an equirectangular texture: longitude 0 faces +X
-// and east runs toward -Z, so z needs the negative sine
-function latLngToPosition(lat: number, lng: number): [number, number, number] {
+// Longitude 0 faces +X and east runs toward -Z (the convention SphereGeometry uses for
+// equirectangular maps), so z needs the negative sine
+function latLngToPosition(lat: number, lng: number, radius = MARKER_RADIUS): [number, number, number] {
   const latRad = (lat * Math.PI) / 180
   const lngRad = (lng * Math.PI) / 180
   return [
-    Math.cos(latRad) * Math.cos(lngRad) * MARKER_RADIUS,
-    Math.sin(latRad) * MARKER_RADIUS,
-    -Math.cos(latRad) * Math.sin(lngRad) * MARKER_RADIUS,
+    Math.cos(latRad) * Math.cos(lngRad) * radius,
+    Math.sin(latRad) * radius,
+    -Math.cos(latRad) * Math.sin(lngRad) * radius,
   ]
 }
 
@@ -214,12 +214,27 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
     progress: number
   } | null>(null)
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Short grace period before hiding, so the pointer can travel from the marker onto the card
+  const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const cancelHide = () => {
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current)
+      hideTimeoutRef.current = null
+    }
+  }
+  const scheduleHide = () => {
+    cancelHide()
+    hideTimeoutRef.current = setTimeout(() => onHotspotHover(null), 250)
+  }
   
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (hoverTimeoutRef.current) {
         clearTimeout(hoverTimeoutRef.current)
+      }
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current)
       }
     }
   }, [])
@@ -229,6 +244,7 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
     name: string
     position: [number, number, number]
     color: string
+    critical: boolean
     species: string
     taxon: iNaturalistTaxon
   }>>([])
@@ -291,13 +307,13 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
       const missingIds = species.map((taxon) => taxon.id).filter((id) => !placements.has(id))
 
       // One bulk request covers most species, but it returns the newest sightings across
-      // all of them (max ~200), so common species can crowd out rare ones
+      // all of them, so common species can crowd out rare ones
       const unplaced: number[] = []
       for (let i = 0; i < missingIds.length; i += BULK_BATCH_SIZE) {
         const batch = missingIds.slice(i, i + BULK_BATCH_SIZE)
-        const observationsByTaxon = await inaturalistAPI.getBulkSpeciesObservations(batch, 3)
+        const batchPlacements = await inaturalistAPI.getBulkSpeciesPlacements(batch)
         for (const id of batch) {
-          const latLng = (observationsByTaxon[id] || []).map(getSightingLatLng).find(Boolean)
+          const latLng = batchPlacements[id]
           if (latLng) {
             placements.set(id, latLngToPosition(latLng.lat, latLng.lng))
           } else {
@@ -310,8 +326,7 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
       const queue = [...unplaced]
       await Promise.all(Array.from({ length: LOOKUP_CONCURRENCY }, async () => {
         for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
-          const sighting = await inaturalistAPI.getLatestSighting(id)
-          const latLng = sighting && getSightingLatLng(sighting)
+          const latLng = await inaturalistAPI.getSpeciesPlacement(id)
           placements.set(id, latLng ? latLngToPosition(latLng.lat, latLng.lng) : null)
         }
       }))
@@ -326,6 +341,7 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
           name: taxon.preferred_common_name || taxon.name,
           position,
           color: getStatusMarkerColor(inaturalistAPI.getIUCNStatus(taxon)),
+          critical: inaturalistAPI.getIUCNStatus(taxon) === 'Critically Endangered',
           species: taxon.name,
           taxon,
         }]
@@ -339,8 +355,7 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
     }
   }, [globeSpecies])
 
-  // Notify parent once the globe has drawn its first frame. This component only mounts
-  // after its Earth texture loads (useTexture suspends), so that frame shows the real globe
+  // Notify parent once the globe has drawn its first frame
   const hasNotifiedLoad = useRef(false)
   useFrame(() => {
     if (!hasNotifiedLoad.current) {
@@ -380,31 +395,44 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
       camera.up.copy(swing.fromUp).applyQuaternion(step)
       camera.lookAt(0, 0, 0)
       if (swing.progress >= 1) cameraSwing.current = null
-    } else if (globeRef.current) {
-      // Slow idle spin, paused while the camera swings so the marker doesn't drift away
+    } else if (globeRef.current && !hoveredHotspot) {
+      // Slow idle spin, paused while the camera swings or a species card is open, so the
+      // marker (and the card pinned to it) holds still
       globeRef.current.rotation.y += delta * 0.05
     }
   })
 
   const hoveredHotspotData = hoveredHotspot ? dynamicHotspots.find((h) => h.id === hoveredHotspot) : undefined
 
-  const earthTexture = useTexture("/realistic-earth-texture-map.jpg")
+  // Land drawn as a dot matrix from real coastlines, so markers sit where the sightings are
+  const landGeometry = useMemo(() => {
+    const dots = landDots(1.4)
+    const positions = new Float32Array(dots.length * 3)
+    dots.forEach(({ lat, lng }, i) => positions.set(latLngToPosition(lat, lng, 2.004), i * 3))
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3))
+    return geometry
+  }, [])
+  useEffect(() => () => landGeometry.dispose(), [landGeometry])
+
 
   return (
     <group>
       {/* Globe and markers rotate together so markers stay pinned to their locations */}
       <group ref={globeRef}>
-        <Sphere args={[2, 32, 32]}>
-          <meshStandardMaterial 
-            map={earthTexture} 
-            roughness={0.8} 
-            metalness={0.2}
-            color="#ffffff"
-          />
+        {/* Ocean */}
+        <Sphere args={[2, 64, 64]}>
+          <meshStandardMaterial color="#0c3442" emissive="#071e27" roughness={0.9} metalness={0.05} />
         </Sphere>
 
-        <Sphere args={[2.05, 32, 32]}>
-          <meshBasicMaterial color="#4a90e2" transparent opacity={0.1} side={THREE.BackSide} />
+        {/* Land */}
+        <points geometry={landGeometry}>
+          <pointsMaterial color="#8ff0c4" size={0.22} sizeAttenuation toneMapped={false} depthWrite={false} />
+        </points>
+
+        {/* Atmosphere */}
+        <Sphere args={[2.12, 48, 48]}>
+          <meshBasicMaterial color="#5ab4c8" transparent opacity={0.07} side={THREE.BackSide} />
         </Sphere>
 
         {/* Dynamic hotspots from search results */}
@@ -413,9 +441,11 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
             key={hotspot.id}
             position={hotspot.position}
             color={hotspot.color}
+            critical={hotspot.critical}
             isSelected={selectedHotspot === hotspot.id}
             onClick={() => onHotspotClick(hotspot.id)}
             onPointerOver={() => {
+              cancelHide()
               // Clear any existing timeout
               if (hoverTimeoutRef.current) {
                 clearTimeout(hoverTimeoutRef.current)
@@ -426,12 +456,12 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
               }, 150) // 150ms delay
             }}
             onPointerOut={() => {
-              // Clear timeout and immediately hide
+              // Cancel a pending show, then hide unless the pointer reaches the card
               if (hoverTimeoutRef.current) {
                 clearTimeout(hoverTimeoutRef.current)
                 hoverTimeoutRef.current = null
               }
-              onHotspotHover(null)
+              scheduleHide()
             }}
           />
         ))}
@@ -442,7 +472,9 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
             zIndexRange={[99999, 100000]}
             style={{ zIndex: 99999 }}
           >
-            <HotspotTooltip hotspotId={hoveredHotspotData.id} />
+            <div onPointerEnter={cancelHide} onPointerLeave={scheduleHide}>
+              <HotspotTooltip hotspotId={hoveredHotspotData.id} />
+            </div>
           </Html>
         )}
       </group>

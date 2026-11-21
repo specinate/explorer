@@ -13,24 +13,24 @@ interface SpeciesSearchProps {
 // `value` is passed straight to searchSpecies as comma-separated IUCN codes.
 // Colors match the globe markers (getStatusMarkerColor) so each chip doubles as a legend
 const STATUS_FILTERS = [
-  { value: "all", label: "All", dots: [], selected: "bg-slate-900 text-white border-slate-900" },
+  { value: "all", label: "All", dots: [], selected: "bg-frost text-night border-frost" },
   {
     value: "CR,EN,VU",
     label: "Threatened",
-    dots: ["bg-red-500", "bg-orange-500", "bg-amber-400"],
-    selected: "bg-slate-900 text-white border-slate-900",
+    dots: ["bg-iucn-cr", "bg-iucn-en", "bg-iucn-vu"],
+    selected: "bg-frost text-night border-frost",
   },
-  { value: "CR", label: "Critically endangered", dots: ["bg-red-500"], selected: "bg-red-500 text-white border-red-500" },
-  { value: "EN", label: "Endangered", dots: ["bg-orange-500"], selected: "bg-orange-500 text-white border-orange-500" },
-  { value: "VU", label: "Vulnerable", dots: ["bg-amber-400"], selected: "bg-amber-400 text-amber-950 border-amber-400" },
+  { value: "CR", label: "Critically endangered", dots: ["bg-iucn-cr"], selected: "bg-iucn-cr text-white border-iucn-cr" },
+  { value: "EN", label: "Endangered", dots: ["bg-iucn-en"], selected: "bg-iucn-en text-neutral-900 border-iucn-en" },
+  { value: "VU", label: "Vulnerable", dots: ["bg-iucn-vu"], selected: "bg-iucn-vu text-neutral-900 border-iucn-vu" },
 ]
 
 const STATUS_DOTS: Record<string, string> = {
-  "Critically Endangered": "bg-red-500",
-  Endangered: "bg-orange-500",
-  Vulnerable: "bg-amber-400",
-  "Near Threatened": "bg-sky-500",
-  "Least Concern": "bg-emerald-500",
+  "Critically Endangered": "bg-iucn-cr",
+  Endangered: "bg-iucn-en",
+  Vulnerable: "bg-iucn-vu",
+  "Near Threatened": "bg-iucn-nt",
+  "Least Concern": "bg-iucn-lc",
 }
 
 const SEARCH_DELAY = 300
@@ -183,9 +183,9 @@ export function SpeciesSearch({ onSelectHotspot, onGlobeSpecies }: SpeciesSearch
       <div className="relative">
         {/* The search icon turns into a spinner while results load */}
         {isLoading ? (
-          <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-600 animate-spin pointer-events-none" aria-hidden />
+          <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-iucn-lc animate-spin pointer-events-none" aria-hidden />
         ) : (
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" aria-hidden />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-mist pointer-events-none" aria-hidden />
         )}
         <input
           ref={inputRef}
@@ -206,7 +206,7 @@ export function SpeciesSearch({ onSelectHotspot, onGlobeSpecies }: SpeciesSearch
           onKeyDown={handleKeyDown}
           placeholder="Search animals, e.g. tiger"
           autoComplete="off"
-          className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow shadow-sm min-h-[44px] text-base"
+          className="w-full pl-10 pr-10 py-3 bg-deep border border-rule rounded-full text-frost placeholder-mist focus:outline-none focus:ring-2 focus:ring-lichen/70 focus:border-transparent transition-shadow min-h-[44px] text-base"
         />
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
           {query ? (
@@ -214,7 +214,7 @@ export function SpeciesSearch({ onSelectHotspot, onGlobeSpecies }: SpeciesSearch
               type="button"
               onClick={clearQuery}
               aria-label="Clear search"
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              className="p-1.5 rounded-full text-mist hover:text-frost hover:bg-frost/10 transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
@@ -223,12 +223,12 @@ export function SpeciesSearch({ onSelectHotspot, onGlobeSpecies }: SpeciesSearch
 
         {/* Results */}
         {isOpen && (
-          <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-50">
+          <div className="absolute top-full left-0 right-0 mt-2 bg-deep border border-rule rounded-xl shadow-2xl shadow-black/50 overflow-hidden z-50">
             {isQueryTooShort ? (
-              <p className="px-4 py-6 text-center text-sm text-slate-500">Keep typing…</p>
+              <p className="px-4 py-6 text-center text-sm text-mist">Keep typing…</p>
             ) : visibleResults.length > 0 ? (
               <>
-                <p className="px-4 pt-3 pb-1 text-xs font-medium text-slate-500">{listHeading}</p>
+                <p className="px-4 pt-3 pb-1 text-xs font-medium text-mist">{listHeading}</p>
                 <ul
                   ref={listRef}
                   id={listboxId}
@@ -253,28 +253,28 @@ export function SpeciesSearch({ onSelectHotspot, onGlobeSpecies }: SpeciesSearch
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => selectSpecies(taxon)}
                         onMouseMove={() => setActiveIndex(index)}
-                        className={`flex items-center gap-3 px-3 py-2 mx-1 rounded-lg cursor-pointer ${isActive ? "bg-slate-100" : ""}`}
+                        className={`flex items-center gap-3 px-3 py-2 mx-1 rounded-lg cursor-pointer ${isActive ? "bg-frost/10" : ""}`}
                       >
-                        <div className="relative w-10 h-10 shrink-0 rounded-lg overflow-hidden bg-slate-100">
+                        <div className="relative w-10 h-10 shrink-0 rounded-lg overflow-hidden bg-night">
                           {taxon.default_photo?.medium_url && (
                             <Image src={taxon.default_photo.medium_url} alt="" fill sizes="40px" className="object-cover" />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-900 truncate">{commonName}</p>
+                          <p className="text-sm font-semibold text-frost truncate">{commonName}</p>
                           {taxon.preferred_common_name && (
-                            <p className="text-xs italic text-slate-500 truncate">{taxon.name}</p>
+                            <p className="text-xs italic text-mist truncate">{taxon.name}</p>
                           )}
                         </div>
                         <div className="shrink-0 text-right">
                           {dot && (
-                            <p className="flex items-center justify-end gap-1.5 text-xs font-medium text-slate-700">
+                            <p className="flex items-center justify-end gap-1.5 text-xs font-medium text-frost/85">
                               <span className={`w-2 h-2 rounded-full ${dot}`} aria-hidden />
                               {status}
                             </p>
                           )}
                           {taxon.observations_count ? (
-                            <p className="text-[11px] text-slate-400">
+                            <p className="text-[11px] text-mist">
                               {compactNumber.format(taxon.observations_count)} sightings
                             </p>
                           ) : null}
@@ -284,31 +284,31 @@ export function SpeciesSearch({ onSelectHotspot, onGlobeSpecies }: SpeciesSearch
                   })}
                 </ul>
                 {remaining > 0 ? (
-                  <div className="px-2 py-2 border-t border-gray-100">
+                  <div className="px-2 py-2 border-t border-rule">
                     <button
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={showMore}
-                      className="w-full py-2 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+                      className="w-full py-2 rounded-lg text-sm font-medium text-frost hover:bg-frost/10 transition-colors"
                     >
                       Show {Math.min(PAGE_SIZE, remaining)} more
                     </button>
                   </div>
                 ) : results.length >= 100 ? (
-                  <p className="px-4 py-2 border-t border-gray-100 text-xs text-slate-500">
+                  <p className="px-4 py-2 border-t border-rule text-xs text-mist">
                     {trimmedQuery ? "Type more of the name" : "Search by name"} or pick a status below to narrow results.
                   </p>
                 ) : null}
               </>
             ) : !isLoading ? (
               <div className="px-4 py-6 text-center">
-                <p className="text-sm font-medium text-slate-700">No species found</p>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-sm font-medium text-frost">No species found</p>
+                <p className="text-xs text-mist mt-1">
                   {statusFilter !== "all" ? "Try a different name or set the filter to All" : "Try a different name"}
                 </p>
               </div>
             ) : (
-              <p className="px-4 py-6 text-center text-sm text-slate-500">Searching…</p>
+              <p className="px-4 py-6 text-center text-sm text-mist">Searching…</p>
             )}
           </div>
         )}
@@ -332,7 +332,7 @@ export function SpeciesSearch({ onSelectHotspot, onGlobeSpecies }: SpeciesSearch
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
                 isSelected
                   ? filter.selected
-                  : "bg-white text-slate-600 border-gray-200 hover:border-slate-400"
+                  : "bg-deep text-mist border-rule hover:text-frost hover:border-mist"
               }`}
             >
               {filter.dots.length > 0 && (
@@ -341,7 +341,7 @@ export function SpeciesSearch({ onSelectHotspot, onGlobeSpecies }: SpeciesSearch
                     <span
                       key={dot}
                       // On a chip filled with its own color, outline the dot so it stays visible
-                      className={`w-2 h-2 rounded-full ${dot} ${isSelected ? "ring-1 ring-white" : ""}`}
+                      className={`w-2 h-2 rounded-full ${dot} ${isSelected ? "ring-1 ring-night/40" : ""}`}
                     />
                   ))}
                 </span>
