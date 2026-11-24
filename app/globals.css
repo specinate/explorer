@@ -109,29 +109,26 @@ body {
   .animate-tag-in { animation: none; }
 }
 
-/* Globe skeleton: meridians sweep across the sphere so it reads as spinning */
-@keyframes globe-skeleton-spin {
-  from { transform: scaleX(1); }
-  to { transform: scaleX(-1); }
+/* Skeleton placeholders: a soft light sweeps across, so loading reads as in progress */
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
 }
 
-@keyframes globe-skeleton-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.75; }
+.skeleton-bone {
+  background: linear-gradient(90deg, #10293a 0%, #183a4c 50%, #10293a 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s linear infinite;
 }
 
-.globe-skeleton-meridian {
-  transform-box: fill-box;
-  transform-origin: center;
-  /* ease-in-out approximates cos(angle): fast across the middle, slow at the edges */
-  animation: globe-skeleton-spin ease-in-out infinite;
-}
-
-.globe-skeleton-pulse {
-  animation: globe-skeleton-pulse 2s ease-in-out infinite;
+/* The same, in ink, for placeholders on the pale specimen label */
+.skeleton-bone-paper {
+  background: linear-gradient(90deg, rgb(26 42 32 / 0.1) 0%, rgb(26 42 32 / 0.2) 50%, rgb(26 42 32 / 0.1) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .globe-skeleton-meridian,
-  .globe-skeleton-pulse { animation: none; }
+  .skeleton-bone,
+  .skeleton-bone-paper { animation: none; }
 }

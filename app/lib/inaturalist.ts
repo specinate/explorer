@@ -30,6 +30,13 @@ export interface iNaturalistTaxon {
   wikipedia_url?: string;
   wikipedia_summary?: string;
   iconic_taxon_name?: string;
+  // Kingdom down to genus; only sent with a single taxon's full record (/taxa/:id)
+  ancestors?: Array<{
+    id: number;
+    name: string;
+    rank: string;
+    preferred_common_name?: string;
+  }>;
   observations_count?: number;
   establishment_means?: string;
   native?: boolean;

@@ -71,3 +71,16 @@ export function landDots(step = 1.6): Array<{ lat: number; lng: number }> {
   }
   return dots
 }
+
+// Lat/lng to a point on a sphere of `radius`, in the globe's frame: longitude 0 faces +X
+// and east runs toward -Z (the convention SphereGeometry uses for equirectangular maps),
+// so z needs the negative sine. Shared by the 3D globe and its loading screen.
+export function latLngToXYZ(lat: number, lng: number, radius: number): [number, number, number] {
+  const latRad = (lat * Math.PI) / 180
+  const lngRad = (lng * Math.PI) / 180
+  return [
+    Math.cos(latRad) * Math.cos(lngRad) * radius,
+    Math.sin(latRad) * radius,
+    -Math.cos(latRad) * Math.sin(lngRad) * radius,
+  ]
+}

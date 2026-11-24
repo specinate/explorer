@@ -6,7 +6,7 @@ import { Sphere, Html } from "@react-three/drei"
 import * as THREE from "three"
 import { Hotspot } from "./hotspot"
 import { HotspotTooltip } from "./hotspot-tooltip"
-import { landDots } from "@/app/lib/land"
+import { landDots, latLngToXYZ } from "@/app/lib/land"
 import { inaturalistAPI, getStatusMarkerColor, type iNaturalistTaxon } from "@/app/lib/inaturalist"
 
 // Commented out static hotspots - now using only iNaturalist data
@@ -176,23 +176,23 @@ interface GlobeProps {
   hoveredHotspot: string | null
   globeSpecies: iNaturalistTaxon[]
   onGlobeLoad?: () => void
+  // Reports markers as they're placed, so the loading screen can show real progress
+  onPlacementProgress?: (progress: PlacementProgress) => void
+}
+
+export interface PlacementProgress {
+  total: number
+  // Species whose location lookup has finished, in list order; position is null when
+  // the species has no wild sighting to place
+  resolved: Array<{ id: number; position: [number, number, number] | null; color: string; critical: boolean }>
+  done: boolean
 }
 
 export type RotateResult = 'rotated' | 'no-marker' | 'superseded'
 
 const MARKER_RADIUS = 2.1
 
-// Longitude 0 faces +X and east runs toward -Z (the convention SphereGeometry uses for
-// equirectangular maps), so z needs the negative sine
-function latLngToPosition(lat: number, lng: number, radius = MARKER_RADIUS): [number, number, number] {
-  const latRad = (lat * Math.PI) / 180
-  const lngRad = (lng * Math.PI) / 180
-  return [
-    Math.cos(latRad) * Math.cos(lngRad) * radius,
-    Math.sin(latRad) * radius,
-    -Math.cos(latRad) * Math.sin(lngRad) * radius,
-  ]
-}
+const latLngToPosition = (lat: number, lng: number, radius = MARKER_RADIUS) => latLngToXYZ(lat, lng, radius)
 
 // Upper bound on markers; the search list adds species 20 at a time via "Show more"
 const MAX_MARKERS = 100
@@ -201,7 +201,7 @@ const BULK_BATCH_SIZE = 20
 const LOOKUP_CONCURRENCY = 4
 
 export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
-  { onHotspotClick, selectedHotspot, onHotspotHover, hoveredHotspot, globeSpecies, onGlobeLoad },
+  { onHotspotClick, selectedHotspot, onHotspotHover, hoveredHotspot, globeSpecies, onGlobeLoad, onPlacementProgress },
   ref,
 ) {
   const globeRef = useRef<THREE.Group>(null)
@@ -248,6 +248,11 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
     species: string
     taxon: iNaturalistTaxon
   }>>([])
+
+  const progressRef = useRef(onPlacementProgress)
+  useEffect(() => {
+    progressRef.current = onPlacementProgress
+  }, [onPlacementProgress])
 
   // Where each species' marker sits (null = no wild sighting with coordinates, so no marker).
   // Kept across searches and "Show more" so nothing is fetched twice
@@ -297,7 +302,10 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
         await placeSpecies()
       } catch (error) {
         console.error('Failed to place species markers:', error)
-        if (!cancelled) settlePendingRotation(new Set(), true)
+        if (!cancelled) {
+          settlePendingRotation(new Set(), true)
+          progressRef.current?.({ total: 0, resolved: [], done: true })
+        }
       }
     }
 
@@ -305,6 +313,24 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
       const species = globeSpecies.slice(0, MAX_MARKERS)
       const placements = placementsRef.current
       const missingIds = species.map((taxon) => taxon.id).filter((id) => !placements.has(id))
+
+      const report = (done = false) => {
+        if (cancelled) return
+        progressRef.current?.({
+          total: species.length,
+          done,
+          resolved: species.filter((taxon) => placements.has(taxon.id)).map((taxon) => {
+            const status = inaturalistAPI.getIUCNStatus(taxon)
+            return {
+              id: taxon.id,
+              position: placements.get(taxon.id) ?? null,
+              color: getStatusMarkerColor(status),
+              critical: status === 'Critically Endangered',
+            }
+          }),
+        })
+      }
+      report()
 
       // One bulk request covers most species, but it returns the newest sightings across
       // all of them, so common species can crowd out rare ones
@@ -320,6 +346,7 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
             unplaced.push(id)
           }
         }
+        report()
       }
 
       // Look the crowded-out species up individually, a few at a time
@@ -328,10 +355,12 @@ export const Globe = forwardRef<GlobeRef, GlobeProps>(function Globe(
         for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
           const latLng = await inaturalistAPI.getSpeciesPlacement(id)
           placements.set(id, latLng ? latLngToPosition(latLng.lat, latLng.lng) : null)
+          report()
         }
       }))
 
       if (cancelled) return
+      report(true)
 
       setDynamicHotspots(species.flatMap((taxon) => {
         const position = placements.get(taxon.id)

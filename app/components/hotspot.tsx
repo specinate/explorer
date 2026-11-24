@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useFrame } from "@react-three/fiber"
+import { useFrame, type ThreeEvent } from "@react-three/fiber"
 import * as THREE from "three"
 import { Billboard } from "@react-three/drei"
 
@@ -53,12 +53,16 @@ export function Hotspot({ position, color, critical = false, isSelected, onClick
     }
   })
 
-  const handlePointerOver = () => {
+  // Hover preview is mouse/pen only: on touch, a tap opens the profile, and a fake
+  // "hover" from the tap would leave the card stuck on screen
+  const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
+    if (e.pointerType === "touch") return
     setIsHovered(true)
     onPointerOver()
   }
 
-  const handlePointerOut = () => {
+  const handlePointerOut = (e: ThreeEvent<PointerEvent>) => {
+    if (e.pointerType === "touch") return
     setIsHovered(false)
     onPointerOut()
   }

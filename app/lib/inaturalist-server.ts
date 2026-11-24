@@ -162,7 +162,8 @@ export async function getSpeciesObservations(
     taxon_id: String(taxonId),
     per_page: String(perPage),
     order: "desc",
-    order_by: "created_at",
+    // Newest sighting first, not newest upload: the profile's "last seen" reads the first one
+    order_by: "observed_on",
     quality_grade: "research",
   });
   const data = await inat<Paged<iNaturalistObservation>>(`/observations?${params}`);

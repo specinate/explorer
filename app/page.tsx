@@ -3,7 +3,7 @@
 import { Canvas } from "@react-three/fiber"
 import { TrackballControls } from "@react-three/drei"
 import { Suspense, useState, useRef, useEffect } from "react"
-import { Globe, type RotateResult } from "@/app/components/globe"
+import { Globe, type RotateResult, type PlacementProgress } from "@/app/components/globe"
 import { SpeciesSearch } from "@/app/components/species-search"
 import { HotspotModal } from "@/app/components/hotspot-modal"
 import { GlobeSkeleton } from "@/app/components/globe-skeleton"
@@ -32,25 +32,30 @@ interface GlobeRef {
   rotateToHotspot: (hotspotId: string) => Promise<RotateResult>
 }
 
-const SKELETON_MIN_MS = 1500
+// Never hold the globe back longer than this, even if marker lookups are slow
+const SKELETON_MAX_MS = 8000
 
 export default function Page() {
   const [selectedHotspot, setSelectedHotspot] = useState<string | null>(null)
   const [selectedSpecies, setSelectedSpecies] = useState<iNaturalistTaxon | null>(null)
   const [hoveredHotspot, setHoveredHotspot] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  // False when the profile was opened because the species has no marker to show
+  const [modalHasMarker, setModalHasMarker] = useState(true)
   const [globeSpecies, setGlobeSpecies] = useState<iNaturalistTaxon[]>([])
   const [isGlobeLoaded, setIsGlobeLoaded] = useState(false)
-  // Keep the skeleton up for a moment even when the globe loads instantly, so it reads
-  // as a deliberate intro rather than a flash
-  const [skeletonMinElapsed, setSkeletonMinElapsed] = useState(false)
+  // The loading screen stays up until it has shown every marker landing (or time runs out)
+  const [placement, setPlacement] = useState<PlacementProgress | null>(null)
+  const [markersShown, setMarkersShown] = useState(false)
+  const [skeletonTimedOut, setSkeletonTimedOut] = useState(false)
   useEffect(() => {
-    const timer = setTimeout(() => setSkeletonMinElapsed(true), SKELETON_MIN_MS)
+    const timer = setTimeout(() => setSkeletonTimedOut(true), SKELETON_MAX_MS)
     return () => clearTimeout(timer)
   }, [])
   const [webGLSupported, setWebGLSupported] = useState<boolean | null>(null)
   const controlsRef = useRef<TrackballControlsType>(null)
   const globeRef = useRef<GlobeRef>(null)
+  const specimenRef = useRef<HTMLElement>(null)
   // Name shown while waiting for a selected species' marker to load
   const [locatingName, setLocatingName] = useState<string | null>(null)
   const selectRequestRef = useRef(0)
@@ -91,6 +96,7 @@ export default function Page() {
     if (result === 'rotated') {
       setHoveredHotspot(hotspotId)
     } else if (result === 'no-marker') {
+      setModalHasMarker(false)
       setIsModalOpen(true)
     }
   }
@@ -143,7 +149,20 @@ export default function Page() {
     const taxonId = Number(hotspotId.replace("dynamic-", ""))
     const taxon = globeSpecies.find((s) => s.id === taxonId)
     if (taxon) setSelectedSpecies(taxon)
-    if (!window.matchMedia("(min-width: 1024px)").matches) setIsModalOpen(true)
+    if (!window.matchMedia("(min-width: 1024px)").matches) {
+      setModalHasMarker(true)
+      setIsModalOpen(true)
+    }
+  }
+
+  // From the profile: close it and bring the species' marker into view
+  const showOnGlobe = async () => {
+    if (!selectedSpecies) return
+    const hotspotId = `dynamic-${selectedSpecies.id}`
+    setIsModalOpen(false)
+    document.querySelector(".globe-container")?.scrollIntoView({ behavior: "smooth", block: "center" })
+    const result = await globeRef.current?.rotateToHotspot(hotspotId)
+    if (result === "rotated") setHoveredHotspot(hotspotId)
   }
 
   // Open with a species on the tag: the first critically endangered one on the globe
@@ -190,7 +209,8 @@ export default function Page() {
           </div>
 
           {/* Globe */}
-          <section className="globe-container order-1 lg:order-none relative overflow-hidden rounded-2xl border border-rule bg-[radial-gradient(circle_at_50%_45%,#10303c_0%,transparent_62%)] h-[min(100vw,62vh)] min-h-[320px] max-h-[560px] lg:h-auto lg:max-h-none lg:min-h-0">
+          {/* `isolate` keeps the marker card's huge z-index inside the globe, so it can't cover the search dropdown */}
+          <section className="globe-container isolate order-1 lg:order-none relative overflow-hidden rounded-2xl border border-rule bg-[radial-gradient(circle_at_50%_45%,#10303c_0%,transparent_62%)] h-[min(100vw,62vh)] min-h-[320px] max-h-[560px] lg:h-auto lg:max-h-none lg:min-h-0">
             {webGLSupported === false ? (
               <div className="absolute inset-0 flex items-center justify-center p-6">
                 <div className="max-w-md text-center space-y-3 rounded-xl border border-rule bg-deep p-6">
@@ -208,6 +228,8 @@ export default function Page() {
               style={{ touchAction: 'none' }}
               dpr={[1, 2]}
               performance={{ min: 0.5 }}
+              // Tapping empty globe dismisses the marker card (touch has no "pointer leave")
+              onPointerMissed={() => setHoveredHotspot(null)}
             >
               <Suspense fallback={null}>
                 <ambientLight intensity={0.9} />
@@ -220,6 +242,7 @@ export default function Page() {
                   hoveredHotspot={hoveredHotspot}
                   globeSpecies={globeSpecies}
                   onGlobeLoad={() => setIsGlobeLoaded(true)}
+                  onPlacementProgress={setPlacement}
                 />
                 {/* Trackball rather than orbit controls so the globe tumbles freely over the poles */}
                 <TrackballControls
@@ -243,7 +266,11 @@ export default function Page() {
             )}
 
             {/* Spinning wireframe in the globe's place until it's ready, then fades out */}
-            <GlobeSkeleton visible={!isGlobeLoaded || (webGLSupported !== false && !skeletonMinElapsed)} />
+            <GlobeSkeleton
+              visible={!isGlobeLoaded || (webGLSupported !== false && !markersShown && !skeletonTimedOut)}
+              progress={placement}
+              onMarkersShown={() => setMarkersShown(true)}
+            />
 
             {/* Shown while a selected species' marker is still loading */}
             {locatingName && (
@@ -287,14 +314,34 @@ export default function Page() {
               </div>
             )}
 
-            <p className="absolute bottom-3 left-3 z-10 hidden sm:block pointer-events-none text-xs text-mist">
-              Drag to turn · scroll or pinch to zoom · tap a point
-            </p>
+            <div className="absolute bottom-3 left-3 z-10 flex flex-col items-start gap-2 max-w-[calc(100%-5rem)]">
+              <p className="pointer-events-none text-xs text-mist">
+                <span className="lg:hidden">Tap a point to learn more</span>
+                <span className="hidden lg:inline">Drag to turn · scroll or pinch to zoom · tap a point</span>
+              </p>
+              {/* Below lg the species card sits under the globe, out of sight; this points to it */}
+              {selectedSpecies && (
+                <button
+                  type="button"
+                  onClick={() => specimenRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  className="lg:hidden flex items-center gap-1.5 max-w-full rounded-full border border-rule bg-deep/85 backdrop-blur-md px-3 py-2 text-sm font-medium text-frost shadow-lg active:bg-frost/15"
+                >
+                  <span className="truncate">{selectedSpecies.preferred_common_name || selectedSpecies.name}</span>
+                  <svg className="w-4 h-4 shrink-0 animate-bounce motion-reduce:animate-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                  <span className="sr-only">: see details below</span>
+                </button>
+              )}
+            </div>
           </section>
 
           {/* Specimen tag */}
-          <aside className="order-3 lg:order-none min-h-0 lg:overflow-y-auto flex flex-col gap-3 lg:pb-1" aria-live="polite">
-            <SpecimenTag species={selectedSpecies} onOpenProfile={() => setIsModalOpen(true)} />
+          <aside ref={specimenRef} className="scroll-mt-3 order-3 lg:order-none min-h-0 lg:overflow-y-auto flex flex-col gap-3 lg:pb-1" aria-live="polite">
+            <SpecimenTag species={selectedSpecies} onOpenProfile={() => {
+              setModalHasMarker(true)
+              setIsModalOpen(true)
+            }} />
             <footer className="mt-auto pt-2 text-[11px] leading-snug text-mist">
               © {new Date().getFullYear()} {FOOTER_OWNER} Need help?{" "}
               <a href="mailto:corianoharris@specinate.com" className="font-medium text-frost underline-offset-2 hover:underline">
@@ -308,6 +355,8 @@ export default function Page() {
       {/* Hotspot Modal */}
       <HotspotModal
         hotspotId={selectedSpecies ? `dynamic-${selectedSpecies.id}` : selectedHotspot}
+        preview={selectedSpecies}
+        onShowOnGlobe={modalHasMarker && webGLSupported ? showOnGlobe : undefined}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
       />

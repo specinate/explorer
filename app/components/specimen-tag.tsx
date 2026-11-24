@@ -68,7 +68,8 @@ export function SpecimenTag({ species, onOpenProfile }: SpecimenTagProps) {
       {/* Photo with a status ribbon (large screens) */}
       {photo && (
         <div className="relative hidden lg:block h-40 bg-tag-ink/10">
-          <Image src={photo} alt={commonName} fill sizes="340px" className="object-cover" />
+          {/* Above the fold on large screens and usually the page's largest paint, so don't lazy-load */}
+          <Image src={photo} alt={commonName} fill sizes="340px" loading="eager" className="object-cover" />
           <div className="absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-black/45 to-transparent" />
           <span
             className="absolute bottom-3 left-4 inline-flex items-center gap-2 rounded-full py-1 pl-1.5 pr-3 text-xs font-bold shadow-md"
